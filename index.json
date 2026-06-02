@@ -1,0 +1,15 @@
+{
+  "name": "Zangetsu Providers",
+  "description": "Streaming sources for the Zangetsu app. Maintained by Spyou.",
+  "sources": [
+    {
+      "id": "fourkhdhub",
+      "name": "4K HDHub",
+      "version": "1.0.0",
+      "type": "movie",
+      "lang": "en",
+      "file": "providers/fourkhdhub.js",
+      "nsfw": false
+    }
+  ]
+}
