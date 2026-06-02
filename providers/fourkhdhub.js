@@ -34,7 +34,7 @@ function _domains() {
 function getInfo() {
   return {
     name: '4K HDHub', lang: 'en', baseUrl: 'https://4khdhub.link',
-    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.2'
+    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.3'
   };
 }
 
@@ -109,6 +109,34 @@ function _epHrefs(url) {
   catch (e) { return []; }
 }
 
+// ── TMDB enrichment (keyless proxy) — 4KHDHub itself only exposes release
+// filenames, so episode names/stills + a clean plot/genres come from TMDB. ──
+var _TMDB = 'https://jumpfreedom.com/3';
+var _STILL = 'https://image.tmdb.org/t/p/w300';
+var _POSTER = 'https://image.tmdb.org/t/p/w500';
+
+function _tj(url) {
+  return fetch(url, { headers: { 'User-Agent': UA }, timeoutMs: 7000 })
+    .then(function (r) { try { return JSON.parse(r.body || 'null'); } catch (e) { return null; } })
+    .catch(function () { return null; });
+}
+
+function _tmdbFind(title, year, isTv) {
+  var q = String(title || '').replace(/\bseason\b.*$/i, '').replace(/\(.*$/, '').trim();
+  return _tj(_TMDB + '/search/' + (isTv ? 'tv' : 'movie') + '?query=' + encodeURIComponent(q))
+    .then(function (j) {
+      var res = (j && j.results) || [];
+      if (!res.length) return null;
+      if (year) {
+        for (var i = 0; i < res.length; i++) {
+          var d = (res[i].first_air_date || res[i].release_date || '');
+          if (d.slice(0, 4) === String(year)) return res[i].id;
+        }
+      }
+      return res[0].id;
+    });
+}
+
 function getDetail(url, opts) {
   return _domains().then(function (d) {
     return _get(url, d.main + '/').then(function (html) {
@@ -117,21 +145,76 @@ function getDetail(url, opts) {
       title = _trim(title) || _trim((html.match(/<meta property="og:title" content="([^"]+)"/) || [])[1] || 'Untitled');
       var poster = (html.match(/<meta property="og:image" content="([^"]+)"/) || [])[1] || null;
       var description = htmlText((html.match(/class="content-section"[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/) || [])[1]
-        || (html.match(/<meta name="description" content="([^"]+)"/) || [])[1] || '');
+        || (html.match(/<meta name="description" content="([^"]+)"/) || [])[1] || '')
+        .replace(/^watch trailer\s*/i, '');
       var year = (html.match(/\b(19|20)\d{2}\b/) || [])[0] || null;
       var tags = [];
       var tm; var tre = /class="badge[^"]*"[^>]*>([^<]+)</g;
       while ((tm = tre.exec(html)) !== null) tags.push(_trim(tm[1]));
       var isSeries = /season-item|episode-download-item/i.test(html) || tags.join(' ').toLowerCase().indexOf('series') !== -1;
-
       var episodes = isSeries ? _seriesEpisodes(html) : _movieEpisode(html, title);
+      // drop release-quality tokens from the scraped genre fallback
+      var cleanTags = tags.filter(function (t) {
+        return !/\b\d+(\.\d+)?\s*(GB|MB)\b|WEB-?DL|WEBRIP|BLU-?RAY|\b\d{3,4}p\b|HDR|H\.?26[45]|x26[45]|HEVC|DDP|DTS|AAC|ATMOS/i.test(t);
+      });
 
-      return {
+      var base = {
         id: url, title: title, cover: poster, url: url, description: description,
-        status: 'unknown', genres: tags.slice(0, 6), studios: [],
+        status: 'unknown', genres: cleanTags.slice(0, 6), studios: [],
         type: 'movie', sourceId: SOURCE_ID, episodes: episodes, year: year,
         subCount: episodes.length, dubCount: 0
       };
+
+      return _tmdbFind(title, year, isSeries).then(function (id) {
+        if (!id) return base;
+        var seasons = [];
+        if (isSeries) {
+          var seen = {};
+          episodes.forEach(function (e) {
+            var m = e.title.match(/^S(\d+)/);
+            var s = m ? m[1] : '1';
+            if (!seen[s]) { seen[s] = 1; seasons.push(parseInt(s, 10)); }
+          });
+        }
+        var jobs = [_tj(_TMDB + '/' + (isSeries ? 'tv' : 'movie') + '/' + id)];
+        seasons.forEach(function (s) {
+          jobs.push(_tj(_TMDB + '/tv/' + id + '/season/' + s).then(function (j) {
+            return { s: s, eps: (j && j.episodes) || [] };
+          }));
+        });
+        return Promise.all(jobs).then(function (all) {
+          var info = all[0];
+          if (info) {
+            if (info.overview) base.description = info.overview;
+            if (info.genres && info.genres.length) {
+              base.genres = info.genres.map(function (g) { return g.name; });
+            }
+            if (info.poster_path) base.cover = _POSTER + info.poster_path;
+          }
+          var meta = {};
+          for (var i = 1; i < all.length; i++) {
+            var sd = all[i];
+            if (!sd) continue;
+            for (var k = 0; k < sd.eps.length; k++) {
+              var ep = sd.eps[k];
+              meta[sd.s + '|' + ep.episode_number] = ep;
+            }
+          }
+          base.episodes = episodes.map(function (e) {
+            var m = e.title.match(/^S(\d+) E(\d+)/);
+            if (!m) return e;
+            var md = meta[parseInt(m[1], 10) + '|' + parseInt(m[2], 10)];
+            if (!md) return e;
+            return {
+              id: e.id, number: e.number, url: e.url,
+              title: 'S' + m[1] + ' E' + m[2] + ' - ' + (md.name || ('Episode ' + m[2])),
+              thumbnail: md.still_path ? (_STILL + md.still_path) : (e.thumbnail || null),
+              date: md.air_date || null
+            };
+          });
+          return base;
+        });
+      }).catch(function () { return base; });
     });
   });
 }
