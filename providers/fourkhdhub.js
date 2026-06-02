@@ -34,7 +34,7 @@ function _domains() {
 function getInfo() {
   return {
     name: '4K HDHub', lang: 'en', baseUrl: 'https://4khdhub.link',
-    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.0'
+    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.1'
   };
 }
 
@@ -150,21 +150,52 @@ function _movieEpisode(html, title) {
 }
 
 function _seriesEpisodes(html) {
-  var eps = [], m;
-  // Each episode-download-item: a badge "Episode-0N" + its download <a> hrefs.
-  var re = /episode-download-item[\s\S]*?(?=episode-download-item|season-item|<\/div>\s*<\/div>\s*<\/div>|$)/g;
-  var blocks = html.match(re) || [];
-  for (var i = 0; i < blocks.length; i++) {
-    var b = blocks[i];
-    var num = (b.match(/Episode[-\s]0*([1-9][0-9]*)/i) || [])[1];
-    if (!num) continue;
-    var hrefs = [], hm; var hre = /<a[^>]+href="([^"]+)"/g;
-    while ((hm = hre.exec(b)) !== null) {
-      if (/hubcloud|hubdrive|hblinks|hubcdn|id=/i.test(hm[1])) hrefs.push(hm[1]);
+  // Each episode is a `.season-item.episode-item` block holding an `S0NE0M`
+  // tag (season+episode) and several `.episode-download-item` links (one per
+  // quality/server). The same episode can appear under multiple resolution
+  // lists, so dedup by (season, episode) and merge links. Titled "S<s> E<e> …"
+  // so the app's season dropdown picks them up.
+  // Each block is a season×quality group ("S05 2160p WEB-DL …"); its season
+  // comes from the header, and each `.episode-download-item` inside is one
+  // episode (badge "Episode-0N") with that quality's link.
+  var map = {}, order = [];
+  var parts = html.split(/class="season-item episode-item/);
+  for (var pi = 1; pi < parts.length; pi++) {
+    var chunk = parts[pi];
+    var head = (chunk.match(/episode-(?:number|title)[^>]*>([\s\S]{0,80}?)</) || [])[1] || '';
+    var sm = head.match(/S(\d{1,2})/i) || chunk.match(/S(\d{1,2})E\d/i);
+    var season = sm ? parseInt(sm[1], 10) : 1;
+    var items = chunk.match(/episode-download-item[\s\S]*?(?=episode-download-item|class="season-item episode-item|class="download-item|$)/g) || [];
+    for (var ii = 0; ii < items.length; ii++) {
+      var it = items[ii];
+      var em = it.match(/Episode[-\s]0*([0-9]+)/i);
+      if (!em) continue;
+      var ep = parseInt(em[1], 10);
+      var hrefs = [], hm, hre = /<a[^>]+href="([^"]+)"/g;
+      while ((hm = hre.exec(it)) !== null) {
+        if (/hubcloud|hubdrive|hblinks|hubcdn|id=/i.test(hm[1])) hrefs.push(hm[1]);
+      }
+      if (!hrefs.length) continue;
+      var key = season + '|' + ep;
+      if (!map[key]) { map[key] = { s: season, e: ep, hrefs: [] }; order.push(key); }
+      for (var k = 0; k < hrefs.length; k++) {
+        if (map[key].hrefs.indexOf(hrefs[k]) === -1) map[key].hrefs.push(hrefs[k]);
+      }
     }
-    hrefs = hrefs.filter(function (v, j, a) { return a.indexOf(v) === j; });
-    if (hrefs.length) eps.push({ id: 'ep:' + num, title: 'Episode ' + num, number: parseFloat(num), url: _epUrl(hrefs) });
   }
+  order.sort(function (a, b) {
+    var x = map[a], y = map[b];
+    return x.s !== y.s ? x.s - y.s : x.e - y.e;
+  });
+  var eps = order.map(function (key) {
+    var o = map[key];
+    return {
+      id: 'S' + o.s + 'E' + o.e, number: o.e,
+      title: 'S' + o.s + ' E' + o.e + ' - Episode ' + o.e, url: _epUrl(o.hrefs)
+    };
+  });
+  // No per-episode blocks → fall back to season-pack links (one combined entry).
+  if (!eps.length) return _movieEpisode(html, 'Full');
   return eps;
 }
 
