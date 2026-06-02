@@ -233,29 +233,52 @@ function _src(url, quality, label) {
   };
 }
 
+// Clean, human server name from a HubCloud button's text.
+function _serverName(label) {
+  if (label.indexOf('fsl') !== -1) return 'FSL Server';
+  if (label.indexOf('buzz') !== -1) return 'Buzz Server';
+  if (label.indexOf('pixeldra') !== -1 || label.indexOf('pixel') !== -1) return 'Pixeldrain';
+  if (label.indexOf('s3') !== -1) return 'S3 Server';
+  if (label.indexOf('10gb') !== -1) return '10Gbps';
+  if (label.indexOf('mega') !== -1) return 'Mega';
+  if (label.indexOf('pdl') !== -1) return 'PDL Server';
+  if (label.indexOf('download') !== -1) return 'Download';
+  return 'Server';
+}
+
+// Builds the display name shown in the player's Sources sheet:
+//   "FSL Server · 2160p [WEB-DL] [2.1GB]"
+function _name(label, quality, extra) {
+  var n = _serverName(label);
+  if (quality) n += ' · ' + quality;
+  if (extra) n += ' ' + extra;
+  return n;
+}
+
 function _hubServer(link, label, quality, extra) {
-  if (label.indexOf('buzzserver') !== -1) {
+  var name = _name(label, quality, extra);
+  if (label.indexOf('buzzserver') !== -1 || label.indexOf('buzz') !== -1) {
     return fetch(link + '/download', {
       headers: { 'Referer': link, 'User-Agent': UA }, followRedirects: false
     }).then(function (r) {
       var h = (r.headers || {});
       var dl = h['hx-redirect'] || h['HX-Redirect'] || '';
-      return dl ? _src(dl, quality, 'Buzz ' + extra) : null;
+      return dl ? _src(dl, quality, name) : null;
     }).catch(function () { return null; });
   }
   if (label.indexOf('pixeldra') !== -1 || label.indexOf('pixel') !== -1) {
     var b = (link.match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
     var fin = link.indexOf('download') !== -1 ? link
       : (b + '/api/file/' + link.replace(/\/$/, '').split('/').pop() + '?download');
-    return Promise.resolve(_src(fin, quality, 'Pixeldrain ' + extra));
+    return Promise.resolve(_src(fin, quality, name));
   }
   if (label.indexOf('fsl') !== -1 || label.indexOf('download file') !== -1 ||
       label.indexOf('s3 server') !== -1 || label.indexOf('mega') !== -1 ||
       label.indexOf('pdl') !== -1 || label.indexOf('10gbps') !== -1) {
-    return Promise.resolve(_src(link, quality, extra));
+    return Promise.resolve(_src(link, quality, name));
   }
   // Unknown button — only keep if it already looks like a direct media file.
-  if (/\.(mp4|mkv|m3u8)(\?|$)/i.test(link)) return Promise.resolve(_src(link, quality, extra));
+  if (/\.(mp4|mkv|m3u8)(\?|$)/i.test(link)) return Promise.resolve(_src(link, quality, name));
   return Promise.resolve(null);
 }
 
@@ -292,7 +315,7 @@ function _dispatch(link) {
 }
 
 function getVideoSources(episodeUrl) {
-  var hrefs = _epHrefs(episodeUrl).slice(0, 6);
+  var hrefs = _epHrefs(episodeUrl).slice(0, 10);
   if (!hrefs.length) return Promise.reject(new Error('4K HDHub: no download links'));
   var jobs = hrefs.map(function (raw) {
     var p = raw.indexOf('id=') !== -1 ? _resolveRedirect(raw) : Promise.resolve(raw);
