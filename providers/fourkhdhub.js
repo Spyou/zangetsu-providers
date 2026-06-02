@@ -34,7 +34,7 @@ function _domains() {
 function getInfo() {
   return {
     name: '4K HDHub', lang: 'en', baseUrl: 'https://4khdhub.link',
-    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.1'
+    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.2'
   };
 }
 
@@ -236,16 +236,17 @@ function _hubcloud(url) {
   return step1.then(function (href) {
     if (!href) return [];
     return _get(href).then(function (doc) {
-      var header = htmlText((doc.match(/class="card-header"[^>]*>([\s\S]*?)<\/div>/) || [])[1] || '');
+      // The release filename lives in the (multi-class) card-header element.
+      var title = htmlText((doc.match(/<div class="card-header[^"]*"[^>]*>([\s\S]*?)<\/div>/) || [])[1] || '');
       var size = htmlText((doc.match(/id=["']size["'][^>]*>([\s\S]*?)<\//) || [])[1] || '');
-      var quality = _quality(header) || '2160p';
-      var label = (header ? ('[' + header + ']') : '') + (size ? ('[' + size + ']') : '');
+      var quality = _quality(title) || '2160p';
+      var info = { tags: _releaseTags(title), size: size, res: _resLabel(quality), quality: quality };
       var jobs = [], m;
       var re = /<a[^>]*href="([^"]+)"[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*>([\s\S]*?)<\/a>|<a[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
       while ((m = re.exec(doc)) !== null) {
         var link = m[1] || m[3]; var text = htmlText(m[2] || m[4] || '').toLowerCase();
         if (!link) continue;
-        jobs.push(_hubServer(link, text, quality, label));
+        jobs.push(_hubServer(link, text, info));
       }
       return Promise.all(jobs).then(function (lists) {
         var out = []; for (var i = 0; i < lists.length; i++) if (lists[i]) out.push(lists[i]);
@@ -277,39 +278,88 @@ function _serverName(label) {
   return 'Server';
 }
 
-// Builds the display name shown in the player's Sources sheet:
-//   "FSL Server · 2160p [WEB-DL] [2.1GB]"
-function _name(label, quality, extra) {
-  var n = _serverName(label);
-  if (quality) n += ' · ' + quality;
-  if (extra) n += ' ' + extra;
+// Maps 2160p → "4K" for the trailing resolution badge (CloudStream-style).
+function _resLabel(quality) {
+  return /2160/.test(String(quality || '')) ? '4K' : (quality || '');
+}
+
+// Parse a release filename into normalised tags, CloudStream-style, e.g.
+// "WEB-DL H265 DDP5.1 HDR10+ AMZN DUAL" / "BLURAY AVC DDP5 DTS-HD X264".
+function _releaseTags(title) {
+  if (!title) return '';
+  var U = (' ' + String(title)
+    .replace(/\.(mkv|mp4|avi|m4v)\s*$/i, '')
+    .replace(/[._]/g, ' ')
+    .replace(/\bWEB[ -]?DL\b/ig, 'WEB-DL')
+    .replace(/\bWEB[ -]?RIP\b/ig, 'WEBRIP')
+    .replace(/\bH[ .]?265\b/ig, 'H265')
+    .replace(/\bH[ .]?264\b/ig, 'H264')
+    .replace(/\bDDP[ .]?(\d(?:\.\d)?)\b/ig, 'DDP$1')
+    .replace(/\bDD[ .]?(\d(?:\.\d)?)\b/ig, 'DD$1')
+    + ' ').toUpperCase();
+  function has(re) { return re.test(U); }
+  var out = [];
+  var groups = [
+    [['WEB-DL', /\bWEB-DL\b/], ['WEBRIP', /\bWEBRIP\b/], ['BLURAY', /\bBLU ?RAY\b|\bBDRIP\b/], ['HDRIP', /\bHDRIP\b/], ['HDTV', /\bHDTV\b/], ['DVDRIP', /\bDVDRIP\b/], ['BRRIP', /\bBRRIP\b/], ['CAM', /\bCAM\b/]],
+    [['H265', /\bH265\b|\bHEVC\b/], ['X265', /\bX265\b/], ['H264', /\bH264\b/], ['X264', /\bX264\b/], ['AVC', /\bAVC\b/]],
+    [['DDP5.1', /\bDDP5\.1\b/], ['DDP5', /\bDDP5\b/], ['DDP', /\bDDP\b/], ['DD5.1', /\bDD5\.1\b/], ['DTS-HD', /\bDTS ?HD\b/], ['DTS', /\bDTS\b/], ['EAC3', /\bEAC3\b/], ['AC3', /\bAC3\b/], ['AAC', /\bAAC\b/], ['FLAC', /\bFLAC\b/]]
+  ];
+  for (var g = 0; g < groups.length; g++) {
+    for (var i = 0; i < groups[g].length; i++) {
+      if (has(groups[g][i][1])) { out.push(groups[g][i][0]); break; }
+    }
+  }
+  if (has(/\bATMOS\b/)) out.push('ATMOS');
+  if (has(/\bHDR10\+\b/) || has(/\bHDR10PLUS\b/)) out.push('HDR10+');
+  else if (has(/\bHDR\b/)) out.push('HDR');
+  if (has(/\bDV\b|\bDOLBY ?VISION\b/)) out.push('DV');
+  var svc = ['AMZN', 'NF', 'DSNP', 'HMAX', 'ATVP', 'HULU', 'PCOK', 'CR'];
+  for (var s = 0; s < svc.length; s++) {
+    if (has(new RegExp('\\b' + svc[s] + '\\b'))) { out.push(svc[s]); break; }
+  }
+  if (has(/\bDUAL\b/)) out.push('DUAL');
+  else if (has(/\bMULTI\b/)) out.push('MULTI');
+  var seen = {}, res = [];
+  for (var k = 0; k < out.length; k++) if (!seen[out[k]]) { seen[out[k]] = 1; res.push(out[k]); }
+  return res.join(' ');
+}
+
+// Builds the Sources-sheet name, CloudStream-style:
+//   "4K HDHub [FSL Server] [WEB-DL H265 DDP5.1 HDR10+ AMZN DUAL] [8.72 GB] 4K"
+function _name(server, info) {
+  var n = '4K HDHub [' + server + ']';
+  if (info.tags) n += ' [' + info.tags + ']';
+  if (info.size) n += ' [' + info.size + ']';
+  if (info.res) n += ' ' + info.res;
   return n;
 }
 
-function _hubServer(link, label, quality, extra) {
-  var name = _name(label, quality, extra);
+function _hubServer(link, label, info) {
+  var server = _serverName(label);
+  var name = _name(server, info);
+  var q = info.quality;
   if (label.indexOf('buzzserver') !== -1 || label.indexOf('buzz') !== -1) {
     return fetch(link + '/download', {
       headers: { 'Referer': link, 'User-Agent': UA }, followRedirects: false
     }).then(function (r) {
       var h = (r.headers || {});
       var dl = h['hx-redirect'] || h['HX-Redirect'] || '';
-      return dl ? _src(dl, quality, name) : null;
+      return dl ? _src(dl, q, name) : null;
     }).catch(function () { return null; });
   }
   if (label.indexOf('pixeldra') !== -1 || label.indexOf('pixel') !== -1) {
     var b = (link.match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
     var fin = link.indexOf('download') !== -1 ? link
       : (b + '/api/file/' + link.replace(/\/$/, '').split('/').pop() + '?download');
-    return Promise.resolve(_src(fin, quality, name));
+    return Promise.resolve(_src(fin, q, name));
   }
   if (label.indexOf('fsl') !== -1 || label.indexOf('download file') !== -1 ||
       label.indexOf('s3 server') !== -1 || label.indexOf('mega') !== -1 ||
       label.indexOf('pdl') !== -1 || label.indexOf('10gbps') !== -1) {
-    return Promise.resolve(_src(link, quality, name));
+    return Promise.resolve(_src(link, q, name));
   }
   // Unknown button — only keep if it already looks like a direct media file.
-  if (/\.(mp4|mkv|m3u8)(\?|$)/i.test(link)) return Promise.resolve(_src(link, quality, name));
+  if (/\.(mp4|mkv|m3u8)(\?|$)/i.test(link)) return Promise.resolve(_src(link, q, name));
   return Promise.resolve(null);
 }
 
