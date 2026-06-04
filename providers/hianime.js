@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.0' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.1' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -79,18 +79,39 @@ function search(query, page, opts) {
   }).catch(function () { return []; });
 }
 
+// Each /home row is either an array (featured) or an {animes:[...]} object
+// (trending/popular/...) — normalise to the underlying list.
+function _rowItems(v) {
+  if (Array.isArray(v)) return v;
+  if (v && Array.isArray(v.animes)) return v.animes;
+  if (v && Array.isArray(v.results)) return v.results;
+  if (v && Array.isArray(v.data)) return v.data;
+  return [];
+}
+
 function getHome(opts) {
   return _api('/home').then(function (j) {
     if (!j) return [];
     var rows = [
-      { title: 'Featured', key: 'featured' },
       { title: 'Trending', key: 'trending' },
       { title: 'Popular', key: 'popular' },
       { title: 'Currently Airing', key: 'currentlyAiring' },
-      { title: 'Latest', key: 'latestAnime' }
+      { title: 'Latest', key: 'latestAnime' },
+      { title: 'Recently Completed', key: 'finishedAiring' }
     ];
-    return rows.map(function (r) { return { title: r.title, items: _cards(j[r.key] || []) }; })
-               .filter(function (r) { return r.items.length; });
+    var out = rows.map(function (r) { return { title: r.title, items: _cards(_rowItems(j[r.key])) }; })
+                  .filter(function (r) { return r.items.length; });
+    // The app uses the FIRST section as the hero carousel, so make sure it has
+    // several items: lead with the featured spotlight, then trending.
+    var feat = _cards(_rowItems(j.featured));
+    if (out.length) {
+      var seen = {}, merged = [];
+      feat.concat(out[0].items).forEach(function (c) { if (c && !seen[c.id]) { seen[c.id] = 1; merged.push(c); } });
+      out[0] = { title: out[0].title, items: merged };
+    } else if (feat.length) {
+      out = [{ title: 'Spotlight', items: feat }];
+    }
+    return out;
   }).catch(function () { return []; });
 }
 
