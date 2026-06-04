@@ -28,6 +28,15 @@
       "lang": "en",
       "file": "providers/uhdmovies.js",
       "nsfw": false
+    },
+    {
+      "id": "hdhub4u",
+      "name": "HDHub4u",
+      "version": "1.0.0",
+      "type": "movie",
+      "lang": "en",
+      "file": "providers/hdhub4u.js",
+      "nsfw": false
     }
   ]
 }
