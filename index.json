@@ -37,6 +37,15 @@
       "lang": "en",
       "file": "providers/hdhub4u.js",
       "nsfw": false
+    },
+    {
+      "id": "hianime",
+      "name": "HiAnime",
+      "version": "1.0.0",
+      "type": "anime",
+      "lang": "en",
+      "file": "providers/hianime.js",
+      "nsfw": false
     }
   ]
 }
