@@ -19,6 +19,15 @@
       "lang": "en",
       "file": "providers/fourkhdhub.js",
       "nsfw": false
+    },
+    {
+      "id": "uhdmovies",
+      "name": "UHD Movies",
+      "version": "1.0.0",
+      "type": "movie",
+      "lang": "en",
+      "file": "providers/uhdmovies.js",
+      "nsfw": false
     }
   ]
 }
