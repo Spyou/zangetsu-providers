@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.1' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.2' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -189,11 +189,29 @@ function getVideoSources(episodeUrl) {
           subs.push({ url: t.file, lang: t.label || 'Sub', label: t.label || 'Sub',
             format: /\.srt(\?|$)/i.test(t.file) ? 'srt' : 'vtt', 'default': !!t['default'] });
         }
-        return [{
-          url: file, quality: 'auto', container: /\.m3u8(\?|$)/i.test(file) ? 'hls' : 'mp4',
-          headers: { 'User-Agent': UA, 'Referer': base + '/', 'Origin': base },
-          kind: cat, audioLang: cat === 'dub' ? 'en' : 'ja', subtitles: subs
-        }];
+        var hdrs = { 'User-Agent': UA, 'Referer': base + '/', 'Origin': base };
+        var mk = function (u, q) {
+          return { url: u, quality: q, container: /\.m3u8(\?|$)/i.test(u) ? 'hls' : 'mp4',
+            headers: hdrs, kind: cat, audioLang: cat === 'dub' ? 'en' : 'ja', subtitles: subs };
+        };
+        if (!/\.m3u8(\?|$)/i.test(file)) return [mk(file, 'auto')];
+        // Adaptive master playlist → expose each rendition so the player shows a
+        // real quality menu (plus "auto" for adaptive switching).
+        return fetch(file, { headers: { 'User-Agent': UA, 'Referer': base + '/' } }).then(function (mr) {
+          var body = mr.body || '';
+          var dir = file.replace(/[^/]*(\?.*)?$/, '');
+          var vs = [], m, re = /#EXT-X-STREAM-INF:[^\n]*?RESOLUTION=\d+x(\d+)[^\n]*\r?\n([^\r\n#]+)/gi;
+          while ((m = re.exec(body)) !== null) {
+            var h = parseInt(m[1], 10);
+            var uri = String(m[2]).replace(/^\s+|\s+$/g, '');
+            if (!uri) continue;
+            vs.push({ h: h, url: /^https?:/i.test(uri) ? uri : (dir + uri) });
+          }
+          vs.sort(function (a, b) { return b.h - a.h; });
+          var out = [mk(file, 'auto')];
+          for (var i = 0; i < vs.length; i++) out.push(mk(vs[i].url, vs[i].h + 'p'));
+          return out;
+        }).catch(function () { return [mk(file, 'auto')]; });
       });
     });
   });
