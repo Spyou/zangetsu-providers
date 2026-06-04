@@ -12,42 +12,6 @@
       "nsfw": false
     },
     {
-      "id": "netmirror_nf",
-      "name": "Netflix",
-      "version": "1.1.0",
-      "type": "movie",
-      "lang": "en",
-      "file": "providers/netmirror.js",
-      "nsfw": false
-    },
-    {
-      "id": "netmirror_pv",
-      "name": "Prime Video",
-      "version": "1.1.0",
-      "type": "movie",
-      "lang": "en",
-      "file": "providers/netmirror.js",
-      "nsfw": false
-    },
-    {
-      "id": "netmirror_hs",
-      "name": "Hotstar",
-      "version": "1.1.0",
-      "type": "movie",
-      "lang": "en",
-      "file": "providers/netmirror.js",
-      "nsfw": false
-    },
-    {
-      "id": "netmirror_dp",
-      "name": "Disney+",
-      "version": "1.1.0",
-      "type": "movie",
-      "lang": "en",
-      "file": "providers/netmirror.js",
-      "nsfw": false
-    },
-    {
       "id": "fourkhdhub",
       "name": "4K HDHub",
       "version": "1.0.3",
