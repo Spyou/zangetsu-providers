@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.4' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.5' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -32,6 +32,37 @@ function _get(url, ref) {
     .then(function (r) { return r.body || ''; }).catch(function () { return ''; });
 }
 function _year(s) { var m = String(s || '').match(/(19|20)\d{2}/); return m ? m[0] : null; }
+
+// The /episodes endpoint returns only the first 100; `?start=N` returns the
+// rest (uncapped). Page through until we've collected `total` episodes so long
+// anime (One Piece, Naruto, ...) aren't capped at 100.
+function _allEpisodes(id) {
+  return _api('/episodes/' + encodeURIComponent(id)).then(function (e) {
+    var all = (e && e.episodes) || [];
+    var total = (e && typeof e.total === 'number') ? e.total : all.length;
+    function finish() {
+      all.sort(function (x, y) { return (x.episodeNumber || 0) - (y.episodeNumber || 0); });
+      return all;
+    }
+    function more(depth) {
+      if (all.length >= total || depth > 40) return finish();
+      var start = all.length + 1;
+      return _api('/episodes/' + encodeURIComponent(id) + '?start=' + start).then(function (e2) {
+        var batch = (e2 && e2.episodes) || [];
+        var have = {};
+        for (var i = 0; i < all.length; i++) have[all[i].episodeNumber] = 1;
+        var added = 0;
+        for (var k = 0; k < batch.length; k++) {
+          var ep = batch[k];
+          if (ep && !have[ep.episodeNumber]) { all.push(ep); added++; }
+        }
+        if (added === 0) return finish();
+        return more(depth + 1);
+      }).catch(function () { return finish(); });
+    }
+    return more(0);
+  }).catch(function () { return []; });
+}
 function _genres(a) {
   var g = a.genres || [];
   return g.map(function (x) { return typeof x === 'string' ? x : (x && (x.name || x.title)); })
@@ -172,8 +203,8 @@ function getDetail(url, opts) {
       episodes: [], year: _year(a.Aired), subCount: a.totalSubbed || 0, dubCount: a.totalDubbed || 0
     };
     if (!id) return base;
-    return _api('/episodes/' + encodeURIComponent(id)).then(function (e) {
-      var eps = (e && e.episodes) || a.episodes || [];
+    return _allEpisodes(id).then(function (eps) {
+      if (!eps.length && a.episodes) eps = a.episodes;
       var out = [];
       for (var i = 0; i < eps.length; i++) {
         var ep = eps[i];
