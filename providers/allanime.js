@@ -20,7 +20,7 @@ function decodeSourceUrl(s) {
 globalThis.__allanimeDecodeSourceUrl = decodeSourceUrl; // test hook
 
 var SEARCH_GQL = 'query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name thumbnail availableEpisodes __typename } }}';
-var SHOW_GQL = 'query ($showId: String!) { show( _id: $showId ) { _id name englishName thumbnail description availableEpisodes availableEpisodesDetail }}';
+var SHOW_GQL = 'query ($showId: String!) { show( _id: $showId ) { _id name englishName thumbnail description malId availableEpisodes availableEpisodesDetail }}';
 
 function _headers() { return { 'Referer': REFERER, 'Origin': ORIGIN, 'User-Agent': UA, 'Content-Type': 'application/json' }; }
 
@@ -33,7 +33,31 @@ function _post(query, variables) {
 }
 
 function getInfo() {
-  return { name: 'AllAnime', lang: 'en', baseUrl: 'https://allanime.to', logo: 'https://allanime.to/favicon.ico', type: 'anime', version: '1.0.0' };
+  return { name: 'AllAnime', lang: 'en', baseUrl: 'https://allanime.to', logo: 'https://allanime.to/favicon.ico', type: 'anime', version: '1.0.1' };
+}
+
+// ── Episode thumbnails (MyAnimeList via Jikan, keyed by malId) ───────────────
+// AllAnime episodes carry no per-episode image, so the app falls back to the
+// series poster. Jikan gives real stills by the show's malId (reachable where
+// TMDB is ISP-blocked). Best-effort: only fills `thumbnail`, never touches
+// ids/numbers/urls or playback. Returns { episodeNumber: thumbnailUrl }.
+function _jikanStills(malId) {
+  if (!malId) return Promise.resolve({});
+  var u = 'https://api.jikan.moe/v4/anime/' + encodeURIComponent(malId) + '/videos/episodes';
+  return fetch(u, { headers: { 'User-Agent': UA }, timeoutMs: 8000 }).then(function (r) {
+    var j; try { j = JSON.parse(r.body || 'null'); } catch (e) { return {}; }
+    var eps = (j && j.data) || [];
+    var map = {};
+    for (var i = 0; i < eps.length; i++) {
+      var e = eps[i];
+      var num = (typeof e.mal_id === 'number')
+        ? e.mal_id
+        : parseInt(String(e.episode || '').replace(/\D+/g, ''), 10);
+      var img = e.images && e.images.jpg && e.images.jpg.image_url;
+      if (num && img) map[num] = img;
+    }
+    return map;
+  }).catch(function () { return {}; });
 }
 
 function _mode(opts) { var m = (opts && opts.category) || 'sub'; return (m === 'dub') ? 'dub' : 'sub'; }
@@ -104,11 +128,21 @@ function getDetail(url, opts) {
       eps.push({ id: cat + ':' + n, title: 'Episode ' + n, number: parseFloat(n),
         url: 'allanime://' + showId + '/' + cat + '/' + n });
     }
-    return { id: showId, title: show.name || showId, englishTitle: show.englishName || null,
+    var detail = { id: showId, title: show.name || showId, englishTitle: show.englishName || null,
       cover: show.thumbnail || null, url: showId, description: htmlText(show.description || ''),
       status: 'unknown', genres: [], studios: [], type: 'anime', sourceId: SOURCE_ID,
       episodes: eps, subCount: (ae.sub != null ? ae.sub : (aed.sub || []).length),
       dubCount: (ae.dub != null ? ae.dub : (aed.dub || []).length) };
+    // Best-effort episode stills from Jikan (additive; poster fallback on miss).
+    return _jikanStills(show.malId).then(function (stills) {
+      if (stills) {
+        for (var k = 0; k < eps.length; k++) {
+          var img = stills[eps[k].number];
+          if (img) eps[k].thumbnail = img;
+        }
+      }
+      return detail;
+    }).catch(function () { return detail; });
   });
 }
 
