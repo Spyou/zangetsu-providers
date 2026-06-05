@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.2' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.3' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -36,6 +36,31 @@ function _genres(a) {
   var g = a.genres || [];
   return g.map(function (x) { return typeof x === 'string' ? x : (x && (x.name || x.title)); })
           .filter(Boolean).slice(0, 6);
+}
+
+// ── Episode thumbnails (MyAnimeList via Jikan, keyed by mal_id) ──────────────
+// The API gives no per-episode image, so the app falls back to the series
+// poster. Jikan lets us look up real per-episode stills directly by the anime's
+// mal_id (TMDB is ISP-blocked in some regions; Jikan is reachable). Strictly
+// best-effort: any failure leaves episodes with the poster fallback and never
+// affects playback. Returns { episodeNumber: thumbnailUrl }.
+function _jikanStills(malId) {
+  if (!malId) return Promise.resolve({});
+  var u = 'https://api.jikan.moe/v4/anime/' + encodeURIComponent(malId) + '/videos/episodes';
+  return fetch(u, { headers: { 'User-Agent': UA }, timeoutMs: 8000 }).then(function (r) {
+    var j; try { j = JSON.parse(r.body || 'null'); } catch (e) { return {}; }
+    var eps = (j && j.data) || [];
+    var map = {};
+    for (var i = 0; i < eps.length; i++) {
+      var e = eps[i];
+      var num = (typeof e.mal_id === 'number')
+        ? e.mal_id
+        : parseInt(String(e.episode || '').replace(/\D+/g, ''), 10);
+      var img = e.images && e.images.jpg && e.images.jpg.image_url;
+      if (num && img) map[num] = img;
+    }
+    return map;
+  }).catch(function () { return {}; });
 }
 
 // One API anime object → a Zangetsu card. Detail is keyed by a slug; home/detail
@@ -145,7 +170,17 @@ function getDetail(url, opts) {
           title: ep.title || ('Episode ' + n), url: _epUrl(cat, player) });
       }
       base.episodes = out;
-      return base;
+      // Best-effort: fill in real episode stills from Jikan by mal_id. Never
+      // blocks or changes ids/numbers/urls — only adds `thumbnail` where found.
+      return _jikanStills(a.mal_id).then(function (stills) {
+        if (stills) {
+          for (var k = 0; k < out.length; k++) {
+            var still = stills[out[k].number];
+            if (still) out[k].thumbnail = still;
+          }
+        }
+        return base;
+      }).catch(function () { return base; });
     }).catch(function () { return base; });
   });
 }
