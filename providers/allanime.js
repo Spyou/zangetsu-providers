@@ -33,30 +33,46 @@ function _post(query, variables) {
 }
 
 function getInfo() {
-  return { name: 'AllAnime', lang: 'en', baseUrl: 'https://allanime.to', logo: 'https://allanime.to/favicon.ico', type: 'anime', version: '1.0.1' };
+  return { name: 'AllAnime', lang: 'en', baseUrl: 'https://allanime.to', logo: 'https://allanime.to/favicon.ico', type: 'anime', version: '1.0.2' };
 }
 
-// ── Episode thumbnails (MyAnimeList via Jikan, keyed by malId) ───────────────
+// ── Episode thumbnails (Kitsu, keyed by the show's malId) ────────────────────
 // AllAnime episodes carry no per-episode image, so the app falls back to the
-// series poster. Jikan gives real stills by the show's malId (reachable where
-// TMDB is ISP-blocked). Best-effort: only fills `thumbnail`, never touches
-// ids/numbers/urls or playback. Returns { episodeNumber: thumbnailUrl }.
-function _jikanStills(malId) {
+// series poster. Kitsu has broad per-episode thumbnails (incl. older anime) and
+// is reachable where TMDB is ISP-blocked. Map malId -> Kitsu id, then page its
+// episodes. Best-effort: only fills `thumbnail`, never touches ids/numbers/urls
+// or playback. Returns { episodeNumber: thumbnailUrl }.
+function _kitsuStills(malId) {
   if (!malId) return Promise.resolve({});
-  var u = 'https://api.jikan.moe/v4/anime/' + encodeURIComponent(malId) + '/videos/episodes';
-  return fetch(u, { headers: { 'User-Agent': UA }, timeoutMs: 8000 }).then(function (r) {
+  var H = { 'Accept': 'application/vnd.api+json', 'User-Agent': UA };
+  var mapUrl = 'https://kitsu.io/api/edge/mappings?filter%5BexternalSite%5D=myanimelist/anime'
+    + '&filter%5BexternalId%5D=' + encodeURIComponent(malId) + '&include=item';
+  return fetch(mapUrl, { headers: H, timeoutMs: 8000 }).then(function (r) {
     var j; try { j = JSON.parse(r.body || 'null'); } catch (e) { return {}; }
-    var eps = (j && j.data) || [];
-    var map = {};
-    for (var i = 0; i < eps.length; i++) {
-      var e = eps[i];
-      var num = (typeof e.mal_id === 'number')
-        ? e.mal_id
-        : parseInt(String(e.episode || '').replace(/\D+/g, ''), 10);
-      var img = e.images && e.images.jpg && e.images.jpg.image_url;
-      if (num && img) map[num] = img;
+    var inc = (j && j.included) || [];
+    var kid = null;
+    for (var i = 0; i < inc.length; i++) {
+      if (inc[i] && inc[i].type === 'anime') { kid = inc[i].id; break; }
     }
-    return map;
+    if (!kid) return {};
+    var map = {};
+    function page(off, depth) {
+      if (depth > 8) return map;
+      var u = 'https://kitsu.io/api/edge/anime/' + kid +
+        '/episodes?page%5Blimit%5D=20&page%5Boffset%5D=' + off;
+      return fetch(u, { headers: H, timeoutMs: 8000 }).then(function (r2) {
+        var d; try { d = JSON.parse(r2.body || 'null'); } catch (e) { return map; }
+        var eps = (d && d.data) || [];
+        for (var k = 0; k < eps.length; k++) {
+          var at = eps[k].attributes || {};
+          var th = at.thumbnail && at.thumbnail.original;
+          if (at.number != null && th) map[at.number] = th;
+        }
+        if (eps.length < 20) return map;
+        return page(off + 20, depth + 1);
+      }).catch(function () { return map; });
+    }
+    return page(0, 0);
   }).catch(function () { return {}; });
 }
 
@@ -134,7 +150,7 @@ function getDetail(url, opts) {
       episodes: eps, subCount: (ae.sub != null ? ae.sub : (aed.sub || []).length),
       dubCount: (ae.dub != null ? ae.dub : (aed.dub || []).length) };
     // Best-effort episode stills from Jikan (additive; poster fallback on miss).
-    return _jikanStills(show.malId).then(function (stills) {
+    return _kitsuStills(show.malId).then(function (stills) {
       if (stills) {
         for (var k = 0; k < eps.length; k++) {
           var img = stills[eps[k].number];

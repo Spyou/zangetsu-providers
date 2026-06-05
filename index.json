@@ -5,7 +5,7 @@
     {
       "id": "allanime",
       "name": "AllAnime",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "type": "anime",
       "lang": "en",
       "file": "providers/allanime.js",
@@ -41,7 +41,7 @@
     {
       "id": "hianime",
       "name": "HiAnime",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "type": "anime",
       "lang": "en",
       "file": "providers/hianime.js",
