@@ -34,7 +34,7 @@ function _domains() {
 function getInfo() {
   return {
     name: '4K HDHub', lang: 'en', baseUrl: 'https://4khdhub.link',
-    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.3'
+    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.4'
   };
 }
 
@@ -167,6 +167,9 @@ function getDetail(url, opts) {
 
       return _tmdbFind(title, year, isSeries).then(function (id) {
         if (!id) return base;
+        // TMDB id drives Simkl movie/series tracking in the app.
+        base.tmdbId = parseInt(id, 10);
+        base.tmdbIsTv = !!isSeries;
         var seasons = [];
         if (isSeries) {
           var seen = {};

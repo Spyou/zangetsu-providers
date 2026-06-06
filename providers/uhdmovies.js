@@ -33,7 +33,7 @@ function _domains() {
 function getInfo() {
   return {
     name: 'UHD Movies', lang: 'en', baseUrl: 'https://uhdmovies.rodeo',
-    logo: 'https://uhdmovies.rodeo/favicon.ico', type: 'movie', version: '1.0.0'
+    logo: 'https://uhdmovies.rodeo/favicon.ico', type: 'movie', version: '1.0.1'
   };
 }
 
@@ -207,6 +207,9 @@ function getDetail(url, opts) {
 
       return _tmdbFind(title, year, isSeries).then(function (id) {
         if (!id) return base;
+        // TMDB id drives Simkl movie/series tracking in the app.
+        base.tmdbId = parseInt(id, 10);
+        base.tmdbIsTv = !!isSeries;
         var seasons = [];
         if (isSeries) {
           var seen = {};

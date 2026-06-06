@@ -14,7 +14,7 @@
     {
       "id": "fourkhdhub",
       "name": "4K HDHub",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "type": "movie",
       "lang": "en",
       "file": "providers/fourkhdhub.js",
@@ -23,7 +23,7 @@
     {
       "id": "uhdmovies",
       "name": "UHD Movies",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "type": "movie",
       "lang": "en",
       "file": "providers/uhdmovies.js",
@@ -32,7 +32,7 @@
     {
       "id": "hdhub4u",
       "name": "HDHub4u",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "type": "movie",
       "lang": "en",
       "file": "providers/hdhub4u.js",

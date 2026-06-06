@@ -35,7 +35,7 @@ function _domains() {
 function getInfo() {
   return {
     name: 'HDHub4u', lang: 'hi', baseUrl: 'https://new2.hdhub4u.limo',
-    logo: 'https://new2.hdhub4u.limo/favicon.ico', type: 'movie', version: '1.2.0'
+    logo: 'https://new2.hdhub4u.limo/favicon.ico', type: 'movie', version: '1.2.1'
   };
 }
 
@@ -217,6 +217,9 @@ function getDetail(url, opts) {
 
       return _tmdbFind(title, year, isSeries).then(function (id) {
         if (!id) return base;
+        // TMDB id drives Simkl movie/series tracking in the app.
+        base.tmdbId = parseInt(id, 10);
+        base.tmdbIsTv = !!isSeries;
         var jobs = [_tj(_TMDB + '/' + (isSeries ? 'tv' : 'movie') + '/' + id)];
         if (isSeries) jobs.push(_tj(_TMDB + '/tv/' + id + '/season/1').then(function (j) { return { eps: (j && j.episodes) || [] }; }));
         return Promise.all(jobs).then(function (all) {
