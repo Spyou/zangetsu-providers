@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.5' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.6' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -126,7 +126,8 @@ function _card(a) {
     id: slug, title: inner.English || inner.title || inner.Japanese || 'Untitled',
     englishTitle: inner.English || null, cover: inner.image || inner.landScapeImage || null,
     url: slug, type: 'anime', sourceId: SOURCE_ID,
-    subCount: inner.totalSubbed || 0, dubCount: inner.totalDubbed || 0
+    subCount: inner.totalSub || inner.totalSubbed || 0,
+    dubCount: inner.totalDub || inner.totalDubbed || 0
   };
 }
 function _cards(list) {
@@ -200,11 +201,24 @@ function getDetail(url, opts) {
       cover: a.image || a.landScapeImage || null, url: slug,
       description: htmlText(a.synopsis || ''), status: a.Status || 'unknown',
       genres: _genres(a), studios: [], type: 'anime', sourceId: SOURCE_ID,
-      episodes: [], year: _year(a.Aired), subCount: a.totalSubbed || 0, dubCount: a.totalDubbed || 0
+      episodes: [], year: _year(a.Aired),
+      // The detail object uses totalSub/totalDub (NOT totalSubbed/totalDubbed);
+      // overridden below with exact counts from the episode links.
+      subCount: a.totalSub || a.totalSubbed || 0,
+      dubCount: a.totalDub || a.totalDubbed || 0
     };
     if (!id) return base;
     return _allEpisodes(id).then(function (eps) {
       if (!eps.length && a.episodes) eps = a.episodes;
+      // Exact sub/dub availability comes from the episodes' link sets — this
+      // drives the player's Sub/Dub toggle and the download sheet's chips.
+      var subN = 0, dubN = 0;
+      for (var ci = 0; ci < eps.length; ci++) {
+        var lk = (eps[ci] && eps[ci].link) || {};
+        if (lk.sub && lk.sub.length) subN++;
+        if (lk.dub && lk.dub.length) dubN++;
+      }
+      if (eps.length) { base.subCount = subN; base.dubCount = dubN; }
       var out = [];
       for (var i = 0; i < eps.length; i++) {
         var ep = eps[i];
