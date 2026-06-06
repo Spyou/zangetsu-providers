@@ -33,7 +33,7 @@ function _post(query, variables) {
 }
 
 function getInfo() {
-  return { name: 'AllAnime', lang: 'en', baseUrl: 'https://allanime.to', logo: 'https://allanime.to/favicon.ico', type: 'anime', version: '1.0.2' };
+  return { name: 'AllAnime', lang: 'en', baseUrl: 'https://allanime.to', logo: 'https://allanime.to/favicon.ico', type: 'anime', version: '1.0.3' };
 }
 
 // ── Episode thumbnails (Kitsu, keyed by the show's malId) ────────────────────
@@ -147,6 +147,8 @@ function getDetail(url, opts) {
     var detail = { id: showId, title: show.name || showId, englishTitle: show.englishName || null,
       cover: show.thumbnail || null, url: showId, description: htmlText(show.description || ''),
       status: 'unknown', genres: [], studios: [], type: 'anime', sourceId: SOURCE_ID,
+      // MAL id drives tracker sync (AniList/MAL/Simkl) in the app.
+      malId: (show.malId != null) ? parseInt(show.malId, 10) : null,
       episodes: eps, subCount: (ae.sub != null ? ae.sub : (aed.sub || []).length),
       dubCount: (ae.dub != null ? ae.dub : (aed.dub || []).length) };
     // Best-effort episode stills from Jikan (additive; poster fallback on miss).

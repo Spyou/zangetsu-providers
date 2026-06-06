@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.6' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.7' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -202,6 +202,8 @@ function getDetail(url, opts) {
       description: htmlText(a.synopsis || ''), status: a.Status || 'unknown',
       genres: _genres(a), studios: [], type: 'anime', sourceId: SOURCE_ID,
       episodes: [], year: _year(a.Aired),
+      // MAL id drives tracker sync (AniList/MAL/Simkl) in the app.
+      malId: (a.mal_id != null) ? parseInt(a.mal_id, 10) : null,
       // The detail object uses totalSub/totalDub (NOT totalSubbed/totalDubbed);
       // overridden below with exact counts from the episode links.
       subCount: a.totalSub || a.totalSubbed || 0,
