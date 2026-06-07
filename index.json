@@ -46,6 +46,24 @@
       "lang": "en",
       "file": "providers/hianime.js",
       "nsfw": false
+    },
+    {
+      "id": "vegamovies",
+      "name": "VegaMovies",
+      "version": "1.0.0",
+      "type": "movie",
+      "lang": "hi",
+      "file": "providers/vegamovies.js",
+      "nsfw": false
+    },
+    {
+      "id": "bollyflix",
+      "name": "BollyFlix",
+      "version": "1.0.0",
+      "type": "movie",
+      "lang": "hi",
+      "file": "providers/bollyflix.js",
+      "nsfw": false
     }
   ]
 }
