@@ -28,6 +28,10 @@ One manifest = many sources. This default repo is added on first launch, so user
 | 4K HDHub | Movie / Series | Movies and series up to 2160p / HDR. |
 | UHD Movies | Movie / Series | Movies and series, high-bitrate releases. |
 | HDHub4u | Movie / Series | Movies and series, Bollywood and Hollywood. |
+| VegaMovies | Movie / Series | Bollywood and Hollywood, multi-quality. |
+| BollyFlix | Movie / Series | Bollywood and Hollywood, dual-audio releases. |
+| MoviesDrive | Movie / Series | Movies and series, WEB-DL releases. |
+| MultiMovies | Movie / Series | Streaming (HLS) for movies and series; series availability varies by title. |
 
 Availability depends on each site staying up; sources are updated as sites change.
 

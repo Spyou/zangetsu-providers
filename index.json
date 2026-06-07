@@ -73,6 +73,15 @@
       "lang": "hi",
       "file": "providers/moviesdrive.js",
       "nsfw": false
+    },
+    {
+      "id": "multimovies",
+      "name": "MultiMovies",
+      "version": "1.0.0",
+      "type": "movie",
+      "lang": "hi",
+      "file": "providers/multimovies.js",
+      "nsfw": false
     }
   ]
 }
