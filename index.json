@@ -50,7 +50,7 @@
     {
       "id": "vegamovies",
       "name": "VegaMovies",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "type": "movie",
       "lang": "hi",
       "file": "providers/vegamovies.js",
@@ -59,7 +59,7 @@
     {
       "id": "bollyflix",
       "name": "BollyFlix",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "type": "movie",
       "lang": "hi",
       "file": "providers/bollyflix.js",

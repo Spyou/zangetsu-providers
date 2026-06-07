@@ -29,7 +29,7 @@ function _domains() {
 function getInfo() {
   return {
     name: 'VegaMovies', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.0'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.1'
   };
 }
 
@@ -332,6 +332,14 @@ function _vcloudLinksFrom(html) {
   return _uniq(out);
 }
 
+// Hosts that serve the whole file with no HTTP range support (seeking loops).
+function _noRange(url) { return /googleusercontent|pages\.dev/i.test(String(url)); }
+function _seekableFirst(list) {
+  var good = [], bad = [];
+  for (var i = 0; i < list.length; i++) (_noRange(list[i].url) ? bad : good).push(list[i]);
+  return good.concat(bad);
+}
+
 function getVideoSources(episodeUrl) {
   var links = _epLinks(episodeUrl).slice(0, 12);
   if (!links.length) return Promise.reject(new Error('VegaMovies: no links'));
@@ -355,7 +363,7 @@ function getVideoSources(episodeUrl) {
         });
       });
       if (!out.length) throw new Error('VegaMovies: no playable sources');
-      return out;
+      return _seekableFirst(out); // seekable mirrors first (range support)
     });
   });
 }

@@ -31,7 +31,7 @@ function _main() {
 function getInfo() {
   return {
     name: 'BollyFlix', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.0'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.1'
   };
 }
 
@@ -303,6 +303,14 @@ function _fastdl(url) {
   }).catch(function () { return []; });
 }
 
+// Hosts that serve the whole file with no HTTP range support (seeking loops).
+function _noRange(url) { return /googleusercontent|pages\.dev/i.test(String(url)); }
+function _seekableFirst(list) {
+  var good = [], bad = [];
+  for (var i = 0; i < list.length; i++) (_noRange(list[i].url) ? bad : good).push(list[i]);
+  return good.concat(bad);
+}
+
 function getVideoSources(episodeUrl) {
   var links = _epLinks(episodeUrl).slice(0, 12);
   if (!links.length) return Promise.reject(new Error('BollyFlix: no links'));
@@ -325,7 +333,12 @@ function getVideoSources(episodeUrl) {
         });
       });
       if (!out.length) throw new Error('BollyFlix: no playable sources');
-      return out;
+      // Seekable mirrors first so the player defaults to one that supports HTTP
+      // range requests (Google-download / *.pages.dev proxies serve the whole
+      // file with no ranges → seeking loops forever). Order is otherwise kept,
+      // and the player re-sorts by quality (stable), so the top quality lands
+      // on a seekable host.
+      return _seekableFirst(out);
     });
   });
 }
