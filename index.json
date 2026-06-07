@@ -50,7 +50,7 @@
     {
       "id": "vegamovies",
       "name": "VegaMovies",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "type": "movie",
       "lang": "hi",
       "file": "providers/vegamovies.js",
@@ -59,7 +59,7 @@
     {
       "id": "bollyflix",
       "name": "BollyFlix",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "type": "movie",
       "lang": "hi",
       "file": "providers/bollyflix.js",
@@ -68,7 +68,7 @@
     {
       "id": "moviesdrive",
       "name": "MoviesDrive",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "type": "movie",
       "lang": "hi",
       "file": "providers/moviesdrive.js",
@@ -77,7 +77,7 @@
     {
       "id": "multimovies",
       "name": "MultiMovies",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "type": "movie",
       "lang": "hi",
       "file": "providers/multimovies.js",

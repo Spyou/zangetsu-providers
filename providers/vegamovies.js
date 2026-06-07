@@ -29,7 +29,7 @@ function _domains() {
 function getInfo() {
   return {
     name: 'VegaMovies', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.1'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.2'
   };
 }
 
@@ -37,7 +37,10 @@ function getInfo() {
 function _trim(s) { return String(s == null ? '' : s).replace(/^\s+|\s+$/g, ''); }
 function _quality(s) { var m = String(s || '').match(/(\d{3,4})[pP]/); return m ? (m[1] + 'p') : null; }
 function _uniq(a) { var s = {}, o = []; for (var i = 0; i < a.length; i++) { if (a[i] && !s[a[i]]) { s[a[i]] = 1; o.push(a[i]); } } return o; }
-function _abs(href, base) { try { return new URL(href, base).href; } catch (e) { return href; } }
+// Use the host absUrl — QuickJS has no URL constructor, so `new URL()` throws
+// there and would silently leave relative hrefs (e.g. search.php permalinks)
+// unresolved, breaking detail loads from search.
+function _abs(href, base) { return absUrl(href, base); }
 function _get(url, ref) {
   return fetch(url, { headers: { 'User-Agent': UA, 'Referer': ref || url } })
     .then(function (r) { return r.body || ''; }).catch(function () { return ''; });
