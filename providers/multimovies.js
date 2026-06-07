@@ -33,7 +33,7 @@ function _main() {
 function getInfo() {
   return {
     name: 'MultiMovies', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.0'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.1'
   };
 }
 
@@ -296,11 +296,49 @@ function _src(url, quality, label, referer) {
   };
 }
 
+// A single-quoted JS string reader honoring \' and \\ escapes. Returns the
+// decoded string plus the index just past the closing quote.
+function _readStr(s, i) {
+  var out = ''; i++;
+  while (i < s.length) {
+    var c = s[i];
+    if (c === '\\') { out += s[i + 1]; i += 2; continue; }
+    if (c === "'") return { str: out, next: i + 1 };
+    out += c; i++;
+  }
+  return { str: out, next: i };
+}
+
+// Robust Dean-Edwards p,a,c,k,e,d unpacker. The host's built-in unpackJs is
+// rigid (it slices on a literal `.split('|'),0,{}))` tail and hardcodes base
+// 62), which silently mis-decodes StreamHG/EarnVids — so we unpack here.
+function _unpack(s) {
+  s = String(s);
+  var h = s.indexOf("}('");
+  if (h < 0 || s.indexOf(".split('|')") < 0) return s;
+  var p = _readStr(s, h + 2);             // payload (template)
+  var rest = s.slice(p.next);             // ,BASE,COUNT,'DICT'.split('|')…
+  var m = rest.match(/^,(\d+),(\d+),/);
+  if (!m) return s;
+  var base = parseInt(m[1], 10), count = parseInt(m[2], 10);
+  var d = _readStr(s, p.next + m[0].length); // dictionary
+  var dict = d.str.split('|');
+  function enc(n) {
+    return (n < base ? '' : enc(Math.floor(n / base))) +
+      ((n = n % base) > 35 ? String.fromCharCode(n + 29) : n.toString(36));
+  }
+  var out = p.str;
+  while (count--) {
+    if (dict[count]) out = out.replace(new RegExp('\\b' + enc(count) + '\\b', 'g'), dict[count]);
+  }
+  return out;
+}
+
 // StreamWish-family embed (StreamHG / EarnVids / etc.): packed JS -> master.m3u8.
 function _resolveEmbed(embed, name, quality) {
   var ref = _baseOf(embed) + '/';
   return _get(embed, ref).then(function (html) {
-    var unp = ''; try { unp = unpackJs(html) || ''; } catch (e) {}
+    var unp = ''; try { unp = _unpack(html); } catch (e) {}
     var hay = html + ' ' + unp;
     var m3 = (hay.match(/https?:\/\/[^"'\\ ]+\.m3u8[^"'\\ ]*/) || [])[0] ||
       (hay.match(/["']file["']\s*:\s*["']([^"']+\.m3u8[^"']*)/i) || [])[1] ||
