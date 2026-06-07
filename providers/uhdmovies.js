@@ -1,7 +1,6 @@
 // UHD Movies — movie/series source for the Zangetsu provider repo.
 //
-// HTML-scraped catalog (regex; no DOM parser in the runtime). Video chain,
-// ported from the phisher CloudStream extension:
+// HTML-scraped catalog (regex; no DOM parser in the runtime). Video chain:
 //   page  →  maxbutton links  →  hrefli/unblockedgames SID bypass (3-step
 //   form POST)  →  driveseed / driveleech  →  direct file (Instant Download /
 //   Resume Cloud / Resume Worker Bot / Direct Links / Cloud Download).
@@ -13,27 +12,28 @@
 var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'uhdmovies';
 
-var DOMAINS_URL = 'https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json';
+var URLS = 'https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json';
+var DEFAULT_MAIN = 'https://uhdmovies.food';
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
 var _dom = null;
 function _domains() {
   if (_dom) return Promise.resolve(_dom);
-  return fetch(DOMAINS_URL, { headers: { 'User-Agent': UA } }).then(function (r) {
+  return fetch(URLS, { headers: { 'User-Agent': UA } }).then(function (r) {
     var j = {}; try { j = JSON.parse(r.body || '{}'); } catch (e) {}
-    _dom = { main: (j['uhdmovies'] || 'https://uhdmovies.rodeo').replace(/\/$/, '') };
+    _dom = { main: String(j['uhdmovies'] || DEFAULT_MAIN).replace(/\/$/, '') };
     return _dom;
   }).catch(function () {
-    _dom = { main: 'https://uhdmovies.rodeo' };
+    _dom = { main: DEFAULT_MAIN };
     return _dom;
   });
 }
 
 function getInfo() {
   return {
-    name: 'UHD Movies', lang: 'en', baseUrl: 'https://uhdmovies.rodeo',
-    logo: 'https://uhdmovies.rodeo/favicon.ico', type: 'movie', version: '1.0.1'
+    name: 'UHD Movies', lang: 'en', baseUrl: DEFAULT_MAIN,
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.2'
   };
 }
 

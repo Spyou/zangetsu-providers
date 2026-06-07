@@ -35,7 +35,7 @@ function _domains() {
 function getInfo() {
   return {
     name: 'HDHub4u', lang: 'hi', baseUrl: 'https://new2.hdhub4u.limo',
-    logo: 'https://new2.hdhub4u.limo/favicon.ico', type: 'movie', version: '1.2.1'
+    logo: 'https://new2.hdhub4u.limo/favicon.ico', type: 'movie', version: '1.2.2'
   };
 }
 
@@ -116,10 +116,15 @@ function search(query, page, opts) {
       var out = [];
       for (var i = 0; i < hits.length; i++) {
         var doc = (hits[i] && hits[i].document) || {};
-        var url = doc.permalink || doc.url; if (!url) continue;
+        var raw = doc.permalink || doc.url; if (!raw) continue;
+        // Index permalinks are relative (or on a stale domain) — strip any host
+        // and rebase the path onto the CURRENT domain so getDetail can load it.
+        var path = String(raw).replace(/^https?:\/\/[^/]+/, '');
+        var url = absUrl(path, d.main);
+        var img = doc.post_thumbnail || doc.feature_img || doc.image || null;
         out.push({
           id: url, title: _cleanTitle(doc.post_title || doc.title || ''),
-          cover: doc.post_thumbnail || doc.feature_img || doc.image || null,
+          cover: img ? absUrl(img, d.main) : null,
           url: url, type: 'movie', sourceId: SOURCE_ID
         });
       }

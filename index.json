@@ -23,7 +23,7 @@
     {
       "id": "uhdmovies",
       "name": "UHD Movies",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "type": "movie",
       "lang": "en",
       "file": "providers/uhdmovies.js",
@@ -32,7 +32,7 @@
     {
       "id": "hdhub4u",
       "name": "HDHub4u",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "type": "movie",
       "lang": "en",
       "file": "providers/hdhub4u.js",
