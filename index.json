@@ -64,6 +64,15 @@
       "lang": "hi",
       "file": "providers/bollyflix.js",
       "nsfw": false
+    },
+    {
+      "id": "moviesdrive",
+      "name": "MoviesDrive",
+      "version": "1.0.0",
+      "type": "movie",
+      "lang": "hi",
+      "file": "providers/moviesdrive.js",
+      "nsfw": false
     }
   ]
 }
