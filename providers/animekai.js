@@ -66,7 +66,7 @@ var MEGA_HOSTS = ['megaup.nl', 'megaup.live', 'megaup.cc', 'megaup22.online',
 
 function getInfo() {
   return { name: 'AnimeKai', lang: 'en', baseUrl: BASE,
-    logo: BASE + '/favicon.ico', type: 'anime', version: '3.0.0' };
+    logo: BASE + '/favicon.ico', type: 'anime', version: '3.0.1' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -168,15 +168,14 @@ function search(query, page, opts) {
   var q = String(query || '').trim();
   if (q.length < 1) return Promise.resolve([]);
   var p = parseInt(page, 10) || 1;
-  var url = BASE + '/ajax/search?keyword=' + encodeURIComponent(q)
-    + (p > 1 ? '&page=' + p : '');
-  return _kai(url, { xhr: true }).then(function (html) {
-    var cards = _cards(html);
-    if (cards.length) return cards;
-    // Fallback to the SSR browser route if the ajax endpoint returns nothing.
-    return _kai(BASE + '/browser?keyword=' + encodeURIComponent(q))
-      .then(function (h2) { return _cards(h2); });
-  }).catch(function () { return []; });
+  // anikai.cc's /ajax/search endpoint is DEAD (returns the literal body "404").
+  // The SSR /browser route IS the working search — spaces go as '+', cards are
+  // the same .aitem blocks the catalog uses.
+  var kw = encodeURIComponent(q).replace(/%20/g, '+');
+  var url = BASE + '/browser?keyword=' + kw + (p > 1 ? '&page=' + p : '');
+  return _kai(url)
+    .then(function (html) { return _cards(html); })
+    .catch(function () { return []; });
 }
 
 function popular(opts) {
@@ -185,21 +184,34 @@ function popular(opts) {
     .catch(function () { return []; });
 }
 
-// Home rows from the homepage widget endpoints (each returns a .aitem grid).
+// Home rows. anikai.cc's /ajax/widget endpoint only serves TWO distinct lists:
+// `trending`, and a single default grid that EVERY other alias (most-popular,
+// top-airing, recently-added, completed, …) returns identically — so those
+// aliases produced "5 rows, same anime, different headers". The plain /browser
+// catalog is a third, distinct list. We use those three and DEDUPE defensively:
+// if the site serves the same grid under two rows (leading card ids match), the
+// duplicate row is dropped — robust even if the default widget rotates.
 function getHome(opts) {
-  var rows = [
-    { title: 'Trending',         alias: 'trending' },
-    { title: 'Recently Updated', alias: 'recently-updated' },
-    { title: 'Most Popular',     alias: 'most-popular' },
-    { title: 'Top Airing',       alias: 'top-airing' },
-    { title: 'Recently Added',   alias: 'recently-added' }
+  var jobs = [
+    { title: 'Trending',         url: BASE + '/ajax/widget/trending?page=1',         xhr: true },
+    { title: 'Recently Updated', url: BASE + '/ajax/widget/recently-updated?page=1', xhr: true },
+    { title: 'New on AnimeKai',  url: BASE + '/browser',                             xhr: false }
   ];
-  return Promise.all(rows.map(function (r) {
-    return _kai(BASE + '/ajax/widget/' + r.alias + '?page=1', { xhr: true })
-      .then(function (html) { return { title: r.title, items: _cards(html) }; })
-      .catch(function () { return { title: r.title, items: [] }; });
-  })).then(function (out) {
-    return out.filter(function (r) { return r.items.length; });
+  return Promise.all(jobs.map(function (j) {
+    return _kai(j.url, { xhr: j.xhr })
+      .then(function (html) { return { title: j.title, items: _cards(html) }; })
+      .catch(function () { return { title: j.title, items: [] }; });
+  })).then(function (rows) {
+    var out = [], seenSig = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (!r.items.length) continue;
+      var sig = r.items.slice(0, 5).map(function (c) { return c.id; }).join(',');
+      if (seenSig[sig]) continue; // same grid as an earlier row → drop the dup
+      seenSig[sig] = 1;
+      out.push(r);
+    }
+    return out;
   }).catch(function () { return []; });
 }
 
