@@ -82,6 +82,15 @@
       "lang": "hi",
       "file": "providers/multimovies.js",
       "nsfw": false
+    },
+    {
+      "id": "animepahe",
+      "name": "AnimePahe",
+      "version": "1.0.0",
+      "type": "anime",
+      "lang": "en",
+      "file": "providers/animepahe.js",
+      "nsfw": false
     }
   ]
 }
