@@ -19,9 +19,10 @@
 var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'animepahe';
 
-// Domain rotates between .ru / .org / .com — followRedirects (default true)
-// chases the canonical host; cf_clearance is cached per host by the app.
-var BASE = 'https://animepahe.ru';
+// Domain rotates often. animepahe.ru is now a PARKED page; the current live
+// host is animepahe.pw (animepahe.com/.org 301 → .pw). Update here if it moves.
+// cf_clearance is cached per host by the app's WebView solver.
+var BASE = 'https://animepahe.pw';
 var KWIK_REFERER = 'https://kwik.si/';
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
