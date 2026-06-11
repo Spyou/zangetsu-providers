@@ -177,14 +177,16 @@ function popular(opts) {
     .catch(function () { return []; });
 }
 
-// Home rows from the listing routes that survive on the live site (verified):
-// the homepage grid sections, /most-popular/, /subbed-anime/, /dubbed-anime/.
+// Home rows from listing routes that survive on the live site (verified). We do
+// NOT split by language — sub vs dub is a per-title choice the app exposes via
+// its own toggle (subCount/dubCount), so language-split rows just duplicate the
+// same titles and read confusingly. Use normal discovery rows instead.
 function getHome(opts) {
   var rows = [
-    { title: 'Most Popular',   url: BASE + '/most-popular/' },
-    { title: 'Latest Episodes', url: BASE + '/' },
-    { title: 'Subbed Anime',   url: BASE + '/subbed-anime/' },
-    { title: 'Dubbed Anime',   url: BASE + '/dubbed-anime/' }
+    { title: 'Latest Episodes',  url: BASE + '/' },
+    { title: 'Most Popular',     url: BASE + '/most-popular/' },
+    { title: 'Recently Updated', url: BASE + '/recently-updated/' },
+    { title: 'Action',           url: BASE + '/genre/action/' }
   ];
   return Promise.all(rows.map(function (r) {
     return _get(r.url, BASE + '/').then(function (html) {
