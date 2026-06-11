@@ -84,15 +84,6 @@
       "nsfw": false
     },
     {
-      "id": "animepahe",
-      "name": "AnimePahe",
-      "version": "1.0.1",
-      "type": "anime",
-      "lang": "en",
-      "file": "providers/animepahe.js",
-      "nsfw": false
-    },
-    {
       "id": "animekai",
       "name": "AnimeKai",
       "version": "1.1.0",
