@@ -66,7 +66,7 @@ var MEGA_HOSTS = ['megaup.nl', 'megaup.live', 'megaup.cc', 'megaup22.online',
 
 function getInfo() {
   return { name: 'AnimeKai', lang: 'en', baseUrl: BASE,
-    logo: BASE + '/favicon.ico', type: 'anime', version: '3.0.1' };
+    logo: BASE + '/favicon.ico', type: 'anime', version: '3.0.2' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -216,11 +216,16 @@ function getHome(opts) {
 }
 
 // ── detail / episodes ────────────────────────────────────────────────────────
-// Episode url packs: category | watch-slug | ep-number. getVideoSources rebuilds
-// the episode page URL (/watch/<slug>/ep-<num>) and resolves servers from it.
+// Episode URL carries the category as a /sub/ or /dub/ PATH SEGMENT (not a
+// prefix). The player's in-session Sub/Dub switch rewrites the first /(sub|dub)/
+// it finds in the url (the AllAnime convention) — so with the cat as a path
+// segment, flipping language works WITHOUT a Detail round-trip. The slug is
+// percent-encoded so it has no literal '/', keeping the cat the ONLY /sub//dub/
+// segment. getVideoSources rebuilds /watch/<slug>/ep-<num> from it; the legacy
+// 'cat|slug|num' form is still parsed for any cached urls.
 function _epUrl(cat, slug, num) {
-  return 'animekai://' + cat + '|' + encodeURIComponent(slug || '')
-    + '|' + encodeURIComponent(String(num));
+  return 'animekai://' + cat + '/' + encodeURIComponent(slug || '')
+    + '/' + encodeURIComponent(String(num));
 }
 
 // Labelled rows in the watch page's <div class="detail"> block:
@@ -371,10 +376,18 @@ function getEpisodes(url, opts) {
 // resolve each embed to a plain m3u8 (+ subtitle from the embed's query param).
 function getVideoSources(episodeUrl) {
   var raw = String(episodeUrl).replace('animekai://', '');
-  var parts = raw.split('|');
-  var cat = parts[0] || 'sub';
-  var slug = parts[1] ? decodeURIComponent(parts[1]) : '';
-  var num = parts[2] ? decodeURIComponent(parts[2]) : '';
+  var cat = 'sub', slug = '', num = '';
+  if (raw.indexOf('|') > -1) {
+    // legacy form: cat|slug|num
+    var lp = raw.split('|');
+    cat = lp[0] || 'sub';
+    slug = lp[1] ? decodeURIComponent(lp[1]) : '';
+    num = lp[2] ? decodeURIComponent(lp[2]) : '';
+  } else {
+    // cat/slug/num — cat is the /sub//dub/ segment the player flips.
+    var pm = raw.match(/^(sub|dub|hsub|softsub)\/(.+)\/([0-9.]+)$/i);
+    if (pm) { cat = pm[1].toLowerCase(); slug = decodeURIComponent(pm[2]); num = pm[3]; }
+  }
   if (slug.indexOf('watch/') !== 0) slug = 'watch/' + slug.replace(/^\//, '');
   if (!num) return Promise.reject(new Error('AnimeKai: no episode number'));
 
