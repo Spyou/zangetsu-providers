@@ -59,19 +59,10 @@
     {
       "id": "bollyflix",
       "name": "BollyFlix",
-      "version": "1.0.4",
+      "version": "1.0.5",
       "type": "movie",
       "lang": "hi",
       "file": "providers/bollyflix.js",
-      "nsfw": false
-    },
-    {
-      "id": "moviesdrive",
-      "name": "MoviesDrive",
-      "version": "1.0.2",
-      "type": "movie",
-      "lang": "hi",
-      "file": "providers/moviesdrive.js",
       "nsfw": false
     },
     {

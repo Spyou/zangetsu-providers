@@ -18,9 +18,15 @@ var _urls = null;
 function _loadUrls() {
   if (_urls) return Promise.resolve(_urls);
   return fetch(URLS, { headers: { 'User-Agent': UA } }).then(function (r) {
-    try { _urls = JSON.parse(r.body || '{}'); } catch (e) { _urls = {}; }
-    return _urls;
-  }).catch(function () { _urls = {}; return _urls; });
+    var j;
+    try { j = JSON.parse(r.body || '{}'); } catch (e) { j = {}; }
+    // Only CACHE a non-empty result. A transient failure must NOT poison the
+    // cache with {} for the whole session — that strands every gdflix/hubcloud
+    // domain lookup on the stale base host (gdflix.io), whose CF redirect to the
+    // real host (new1.gdflix.io) then crosses a host boundary and 403s unsolved.
+    if (j && Object.keys(j).length) _urls = j;
+    return j;
+  }).catch(function () { return {}; });
 }
 function _main() {
   return _loadUrls().then(function (j) {
@@ -31,7 +37,7 @@ function _main() {
 function getInfo() {
   return {
     name: 'BollyFlix', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.4'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.5'
   };
 }
 
