@@ -302,8 +302,14 @@ function getHome(opts) {
       var p = BFF + '/tab/ranking-list?tabId=0&categoryType=' + row.id + '&page=1&perPage=18';
       return _api(p, null).then(function (j) {
         var out = []; _collect(j && j.data, out, 0);
+        try {
+          console.log('[mb] ' + row.title + ' code=' + (j ? j.code : 'NULL')
+            + ' dataKeys=' + (j && j.data ? Object.keys(j.data).join('|') : '-')
+            + ' subjects=' + (j && j.data && j.data.subjects ? j.data.subjects.length : '?')
+            + ' parsed=' + out.length);
+        } catch (e) { console.log('[mb] log err ' + e); }
         return { title: row.title, items: _uniqBy(out) };
-      }).catch(function () { return { title: row.title, items: [] }; });
+      }).catch(function (e) { console.log('[mb] ' + row.title + ' FAIL ' + e); return { title: row.title, items: [] }; });
     }));
   }).then(function (sections) {
     return sections.filter(function (s) { return s.items.length; });
