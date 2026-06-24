@@ -31,7 +31,7 @@ function _main() {
 function getInfo() {
   return {
     name: 'BollyFlix', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.3'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.4'
   };
 }
 
