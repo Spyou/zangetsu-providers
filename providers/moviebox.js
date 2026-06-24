@@ -274,7 +274,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.5'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.6'
   };
 }
 
@@ -316,8 +316,15 @@ function getHome(opts) {
         var out = [];
         for (var k = 0; k < subs.length; k++) { var it = _item(subs[k]); if (it) out.push(it); }
         if (out.length) sections.push({ title: row.title, items: _uniqBy(out) });
+        var s0 = subs[0] || {};
+        fetch('https://mbz6.invalid/?v=106&r=' + encodeURIComponent(row.title) + '&j=' + (j ? 1 : 0)
+          + '&code=' + (j ? j.code : 'x') + '&subs=' + subs.length + '&out=' + out.length
+          + '&k0=' + encodeURIComponent(Object.keys(s0).slice(0, 3).join(',')) + '&id0=' + (s0.subjectId ? 1 : 0)).catch(function () { });
         return step(i + 1);
-      }).catch(function () { return step(i + 1); });
+      }).catch(function (e) {
+        fetch('https://mbz6.invalid/?v=106&r=' + encodeURIComponent(row.title) + '&THREW=' + encodeURIComponent(String(e)).slice(0, 60)).catch(function () { });
+        return step(i + 1);
+      });
     }
     return step(0);
   }).then(function (sections) {
