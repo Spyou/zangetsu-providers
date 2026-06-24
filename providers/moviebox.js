@@ -274,7 +274,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.2'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.3'
   };
 }
 
@@ -309,6 +309,7 @@ function getHome(opts) {
         var out = [];
         for (var i = 0; i < subs.length; i++) { var it = _item(subs[i]); if (it) out.push(it); }
         if (!out.length) _collect(j && j.data, out, 0); // fallback for other shapes
+        fetch('https://mbz2.invalid/?r=' + encodeURIComponent(row.title) + '&tok=' + (_token ? 1 : 0) + '&code=' + (j ? j.code : 'x') + '&out=' + out.length).catch(function () { });
         return { title: row.title, items: _uniqBy(out) };
       }).catch(function () { return { title: row.title, items: [] }; });
     }));

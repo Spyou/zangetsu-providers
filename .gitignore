@@ -1,0 +1,17 @@
+# Local-only notes / scratch (never push to the public repo)
+NOTES.md
+TODO.md
+notes/
+scratch/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Logs / temp
+*.log
+tmp/
