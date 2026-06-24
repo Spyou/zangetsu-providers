@@ -274,7 +274,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.1.1'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.1.2'
   };
 }
 
@@ -301,28 +301,24 @@ function getHome(opts) {
     { id: '4741626294545400336', title: 'Top Series This Week' },
     { id: '8434602210994128512', title: 'Anime' }
   ];
+  // TEMP probe: report the IN-APP body length + tail + parse state on-screen.
+  // If bl < full or the tail is mid-JSON → the body is truncated crossing the
+  // bridge (the real bug). If bl is full but parse fails → a runtime quirk.
   return _ensureAuth().then(function () {
-    var sections = [];
-    function step(i, tries) {
-      if (i >= rows.length) return sections;
-      var row = rows[i];
-      var p = BFF + '/tab/ranking-list?tabId=0&categoryType=' + row.id + '&page=1&perPage=10';
-      return _api(p, null).then(function (j) {
-        var out = [];
-        var subs = (j && j.data && j.data.subjects) || [];
-        for (var k = 0; k < subs.length; k++) { var it = _item(subs[k]); if (it) out.push(it); }
-        if (!out.length) _collect(j && j.data, out, 0);
-        if (!out.length && tries < 3) return step(i, tries + 1);
-        if (out.length) sections.push({ title: row.title, items: _uniqBy(out) });
-        return step(i + 1, 0);
-      }).catch(function () {
-        return tries < 3 ? step(i, tries + 1) : step(i + 1, 0);
-      });
-    }
-    return step(0, 0);
-  }).then(function (sections) {
-    return sections.filter(function (s) { return s.items.length; });
-  }).catch(function () { return []; });
+    return _call(BFF + '/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=10', null).then(function (r) {
+      var b = (r && typeof r.body === 'string') ? r.body : '';
+      var tail = b.slice(-8);
+      var j = null, perr = '';
+      try { j = JSON.parse(b || '{}'); } catch (e) { perr = String(e).slice(0, 28); }
+      var subs = (j && j.data && j.data.subjects) || [];
+      var t = 'DBG bl=' + b.length + ' end=' + tail + ' j=' + (j ? 1 : 0) + ' subs=' + subs.length + (perr ? (' E=' + perr) : '');
+      return [{ title: t, items: [{ id: 'd', title: 'diag', cover: null, url: 'd', type: 'movie', sourceId: SOURCE_ID }] }];
+    }).catch(function (e) {
+      return [{ title: 'DBG THREW ' + String(e).slice(0, 50), items: [{ id: 'd', title: 'diag', cover: null, url: 'd', type: 'movie', sourceId: SOURCE_ID }] }];
+    });
+  }).catch(function (e) {
+    return [{ title: 'DBG AUTH ' + String(e).slice(0, 45), items: [{ id: 'd', title: 'diag', cover: null, url: 'd', type: 'movie', sourceId: SOURCE_ID }] }];
+  });
 }
 
 function getDetail(url, opts) {
