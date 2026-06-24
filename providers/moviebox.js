@@ -274,7 +274,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.7'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.8'
   };
 }
 
@@ -307,23 +307,29 @@ function getHome(opts) {
     // the bridge and intermittently corrupts response bodies (JSON.parse then
     // throws → empty rows → "couldn't load"). Sequential is reliable.
     var sections = [];
-    function step(i) {
+    // Fetch one row at a time, and RETRY a row whose body came back unparseable.
+    // The 16KB+ JSON gets double-encoded and handed to the JS engine re-entrantly
+    // while getHome is still running; that intermittently corrupts the body so
+    // JSON.parse throws (verified: the same row parses on one attempt, fails the
+    // next). A fresh fetch gets a clean body, so a couple of retries make it
+    // reliable. perPage=10 keeps each body small to begin with.
+    function step(i, tries) {
       if (i >= rows.length) return sections;
       var row = rows[i];
-      // Smaller perPage → smaller response body. Large JSON bodies can get
-      // truncated/corrupted crossing into the single-threaded JS engine, which
-      // breaks JSON.parse and empties the row.
       var p = BFF + '/tab/ranking-list?tabId=0&categoryType=' + row.id + '&page=1&perPage=10';
       return _api(p, null).then(function (j) {
         var out = [];
         var subs = (j && j.data && j.data.subjects) || [];
         for (var k = 0; k < subs.length; k++) { var it = _item(subs[k]); if (it) out.push(it); }
         if (!out.length) _collect(j && j.data, out, 0); // proven recursive fallback
+        if (!out.length && tries < 3) return step(i, tries + 1); // body likely corrupted — refetch
         if (out.length) sections.push({ title: row.title, items: _uniqBy(out) });
-        return step(i + 1);
-      }).catch(function () { return step(i + 1); });
+        return step(i + 1, 0);
+      }).catch(function () {
+        return tries < 3 ? step(i, tries + 1) : step(i + 1, 0);
+      });
     }
-    return step(0);
+    return step(0, 0);
   }).then(function (sections) {
     return sections.filter(function (s) { return s.items.length; });
   }).catch(function () { return []; });
