@@ -59,7 +59,7 @@
     {
       "id": "bollyflix",
       "name": "BollyFlix",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "type": "movie",
       "lang": "hi",
       "file": "providers/bollyflix.js",
