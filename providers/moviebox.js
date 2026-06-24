@@ -274,7 +274,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.8'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.9'
   };
 }
 
@@ -322,10 +322,17 @@ function getHome(opts) {
         var subs = (j && j.data && j.data.subjects) || [];
         for (var k = 0; k < subs.length; k++) { var it = _item(subs[k]); if (it) out.push(it); }
         if (!out.length) _collect(j && j.data, out, 0); // proven recursive fallback
+        var s0 = (subs && subs[0]) || {};
+        fetch('https://mbz9.invalid/?r=' + encodeURIComponent(row.title) + '&t=' + tries
+          + '&j=' + (j ? 1 : 0) + '&code=' + (j ? j.code : 'x') + '&dt=' + (j ? (typeof j.data) : 'x')
+          + '&dk=' + (j && j.data ? encodeURIComponent(Object.keys(j.data).slice(0, 4).join(',')) : '-')
+          + '&subs=' + subs.length + '&out=' + out.length
+          + '&sk=' + encodeURIComponent(Object.keys(s0).slice(0, 4).join(','))).catch(function () { });
         if (!out.length && tries < 3) return step(i, tries + 1); // body likely corrupted — refetch
         if (out.length) sections.push({ title: row.title, items: _uniqBy(out) });
         return step(i + 1, 0);
-      }).catch(function () {
+      }).catch(function (e) {
+        fetch('https://mbz9.invalid/?r=' + encodeURIComponent(row.title) + '&t=' + tries + '&THREW=' + encodeURIComponent(String(e)).slice(0, 50)).catch(function () { });
         return tries < 3 ? step(i, tries + 1) : step(i + 1, 0);
       });
     }
