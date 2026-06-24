@@ -301,15 +301,17 @@ function getHome(opts) {
     return Promise.all(rows.map(function (row) {
       var p = BFF + '/tab/ranking-list?tabId=0&categoryType=' + row.id + '&page=1&perPage=18';
       return _api(p, null).then(function (j) {
-        var out = []; _collect(j && j.data, out, 0);
-        try {
-          console.log('[mb] ' + row.title + ' code=' + (j ? j.code : 'NULL')
-            + ' dataKeys=' + (j && j.data ? Object.keys(j.data).join('|') : '-')
-            + ' subjects=' + (j && j.data && j.data.subjects ? j.data.subjects.length : '?')
-            + ' parsed=' + out.length);
-        } catch (e) { console.log('[mb] log err ' + e); }
+        var subs = (j && j.data && j.data.subjects) || [];
+        var out = [];
+        for (var i = 0; i < subs.length; i++) { var it = _item(subs[i]); if (it) out.push(it); }
+        if (!out.length) _collect(j && j.data, out, 0); // fallback for other shapes
+        // DIAGNOSTIC (release strips console.log; the [fetch] log survives):
+        fetch('https://mbdbg.invalid/?row=' + encodeURIComponent(row.title)
+          + '&j=' + (j ? 1 : 0) + '&code=' + (j ? j.code : 'x')
+          + '&bodylen=' + ((j && j.data) ? 'D' : 'noD')
+          + '&subs=' + subs.length + '&out=' + out.length).catch(function () { });
         return { title: row.title, items: _uniqBy(out) };
-      }).catch(function (e) { console.log('[mb] ' + row.title + ' FAIL ' + e); return { title: row.title, items: [] }; });
+      }).catch(function () { return { title: row.title, items: [] }; });
     }));
   }).then(function (sections) {
     return sections.filter(function (s) { return s.items.length; });
