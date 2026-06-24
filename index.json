@@ -57,15 +57,6 @@
       "nsfw": false
     },
     {
-      "id": "bollyflix",
-      "name": "BollyFlix",
-      "version": "1.0.5",
-      "type": "movie",
-      "lang": "hi",
-      "file": "providers/bollyflix.js",
-      "nsfw": false
-    },
-    {
       "id": "multimovies",
       "name": "MultiMovies",
       "version": "1.0.2",
