@@ -274,7 +274,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.1.0'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.1.1'
   };
 }
 
@@ -294,26 +294,35 @@ function search(query, page, opts) {
 }
 
 function getHome(opts) {
-  // TEMP on-screen diagnostic: fetch ONE row and report the in-app body/parse
-  // state in the section title (the device's logcat/fetch capture is unreliable;
-  // a screenshot is not). Reverted once the root cause is found.
+  var rows = [
+    { id: '4516404531735022304', title: 'Trending' },
+    { id: '8019599703232971616', title: 'Hollywood' },
+    { id: '414907768299210008', title: 'Bollywood' },
+    { id: '4741626294545400336', title: 'Top Series This Week' },
+    { id: '8434602210994128512', title: 'Anime' }
+  ];
   return _ensureAuth().then(function () {
-    return _call(BFF + '/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=10', null).then(function (r) {
-      var bt = r ? (typeof r.body) : 'noR';
-      var bl = (r && typeof r.body === 'string') ? r.body.length : -1;
-      var st = r ? r.status : 'noR';
-      var j = null, perr = '';
-      try { j = JSON.parse((r && r.body) || '{}'); } catch (e) { perr = String(e).slice(0, 40); }
-      var subs = (j && j.data && j.data.subjects) || [];
-      var t = 'DBG st=' + st + ' bt=' + bt + ' bl=' + bl + ' j=' + (j ? 1 : 0)
-        + ' code=' + (j ? j.code : 'x') + ' subs=' + subs.length + (perr ? (' E=' + perr) : '');
-      return [{ title: t, items: [{ id: 'd1', title: 'diag', cover: null, url: 'd1', type: 'movie', sourceId: SOURCE_ID }] }];
-    }).catch(function (e) {
-      return [{ title: 'DBG CALL-THREW ' + String(e).slice(0, 60), items: [{ id: 'd2', title: 'diag', cover: null, url: 'd2', type: 'movie', sourceId: SOURCE_ID }] }];
-    });
-  }).catch(function (e) {
-    return [{ title: 'DBG AUTH-THREW ' + String(e).slice(0, 55), items: [{ id: 'd3', title: 'diag', cover: null, url: 'd3', type: 'movie', sourceId: SOURCE_ID }] }];
-  });
+    var sections = [];
+    function step(i, tries) {
+      if (i >= rows.length) return sections;
+      var row = rows[i];
+      var p = BFF + '/tab/ranking-list?tabId=0&categoryType=' + row.id + '&page=1&perPage=10';
+      return _api(p, null).then(function (j) {
+        var out = [];
+        var subs = (j && j.data && j.data.subjects) || [];
+        for (var k = 0; k < subs.length; k++) { var it = _item(subs[k]); if (it) out.push(it); }
+        if (!out.length) _collect(j && j.data, out, 0);
+        if (!out.length && tries < 3) return step(i, tries + 1);
+        if (out.length) sections.push({ title: row.title, items: _uniqBy(out) });
+        return step(i + 1, 0);
+      }).catch(function () {
+        return tries < 3 ? step(i, tries + 1) : step(i + 1, 0);
+      });
+    }
+    return step(0, 0);
+  }).then(function (sections) {
+    return sections.filter(function (s) { return s.items.length; });
+  }).catch(function () { return []; });
 }
 
 function getDetail(url, opts) {
