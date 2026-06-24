@@ -172,7 +172,7 @@ function _trSig(method, accept, ctype, url, body, ts) {
 // response header; play-info needs it as `Authorization: Bearer`. We mint one
 // device_id per session and capture the token off the first response that
 // carries it (the JWT is good for ~months, so once per session is plenty).
-var _device = null, _token = null, _tokenTried = false;
+var _device = null, _token = null, _authPromise = null;
 function _dev() { if (!_device) _device = _md5hex(String(_now()) + 'zmb').slice(0, 16); return _device; }
 function _clientInfo() {
   return '{"package_name":"com.community.oneroom","version_name":"3.0.13.0325.03",'
@@ -220,10 +220,14 @@ var _REG_ID = '5038022591622040232';
 // Mint a guest token if we don't have one. ranking-list (home) and play-info
 // both 401 without it; subject-api/get returns the x-user JWT that _call grabs.
 function _ensureAuth(subjectId) {
-  if (_token || _tokenTried) return Promise.resolve();
-  _tokenTried = true;
-  return _call(BFF + '/subject-api/get?subjectId=' + (subjectId || _REG_ID), null)
+  if (_token) return Promise.resolve();
+  // Share ONE in-flight registration: concurrent callers (e.g. getHome's rows
+  // firing together) must WAIT for the token, not skip ahead while it's still
+  // being minted — otherwise their requests go out unauthenticated and 401/null.
+  if (_authPromise) return _authPromise;
+  _authPromise = _call(BFF + '/subject-api/get?subjectId=' + (subjectId || _REG_ID), null)
     .then(function () { }).catch(function () { });
+  return _authPromise;
 }
 
 // ── helpers / models ─────────────────────────────────────────────────────────
@@ -270,7 +274,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.1'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.2'
   };
 }
 
@@ -305,11 +309,6 @@ function getHome(opts) {
         var out = [];
         for (var i = 0; i < subs.length; i++) { var it = _item(subs[i]); if (it) out.push(it); }
         if (!out.length) _collect(j && j.data, out, 0); // fallback for other shapes
-        // DIAGNOSTIC (release strips console.log; the [fetch] log survives):
-        fetch('https://mbdbg.invalid/?row=' + encodeURIComponent(row.title)
-          + '&j=' + (j ? 1 : 0) + '&code=' + (j ? j.code : 'x')
-          + '&bodylen=' + ((j && j.data) ? 'D' : 'noD')
-          + '&subs=' + subs.length + '&out=' + out.length).catch(function () { });
         return { title: row.title, items: _uniqBy(out) };
       }).catch(function () { return { title: row.title, items: [] }; });
     }));
