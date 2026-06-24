@@ -5,7 +5,7 @@
     {
       "id": "moviebox",
       "name": "MovieBox",
-      "version": "1.0.9",
+      "version": "1.1.0",
       "type": "movie",
       "lang": "en",
       "file": "providers/moviebox.js",
