@@ -214,12 +214,15 @@ function _api(path, body) {
     try { return JSON.parse((r && r.body) || '{}'); } catch (e) { return null; }
   }).catch(function () { return null; });
 }
-// Make sure we hold a guest token before a play call. Most of the time getHome/
-// search/getDetail already captured one; this is the fallback for a cold play.
+// A stable, long-lived title — subject-api/get on it mints the guest token when
+// we have no real subjectId yet (i.e. for the browse home).
+var _REG_ID = '5038022591622040232';
+// Mint a guest token if we don't have one. ranking-list (home) and play-info
+// both 401 without it; subject-api/get returns the x-user JWT that _call grabs.
 function _ensureAuth(subjectId) {
   if (_token || _tokenTried) return Promise.resolve();
   _tokenTried = true;
-  return _call(BFF + '/subject-api/get?subjectId=' + subjectId, null)
+  return _call(BFF + '/subject-api/get?subjectId=' + (subjectId || _REG_ID), null)
     .then(function () { }).catch(function () { });
 }
 
@@ -267,7 +270,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.0'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.1'
   };
 }
 
@@ -294,13 +297,15 @@ function getHome(opts) {
     { id: '4741626294545400336', title: 'Top Series This Week' },
     { id: '8434602210994128512', title: 'Anime' }
   ];
-  return Promise.all(rows.map(function (row) {
-    var p = BFF + '/tab/ranking-list?tabId=0&categoryType=' + row.id + '&page=1&perPage=18';
-    return _api(p, null).then(function (j) {
-      var out = []; _collect(j && j.data, out, 0);
-      return { title: row.title, items: _uniqBy(out) };
-    }).catch(function () { return { title: row.title, items: [] }; });
-  })).then(function (sections) {
+  return _ensureAuth().then(function () {
+    return Promise.all(rows.map(function (row) {
+      var p = BFF + '/tab/ranking-list?tabId=0&categoryType=' + row.id + '&page=1&perPage=18';
+      return _api(p, null).then(function (j) {
+        var out = []; _collect(j && j.data, out, 0);
+        return { title: row.title, items: _uniqBy(out) };
+      }).catch(function () { return { title: row.title, items: [] }; });
+    }));
+  }).then(function (sections) {
     return sections.filter(function (s) { return s.items.length; });
   }).catch(function () { return []; });
 }
