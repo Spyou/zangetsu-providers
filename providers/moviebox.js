@@ -274,7 +274,7 @@ function _unEp(url) {
 function getInfo() {
   return {
     name: 'MovieBox', lang: 'en', baseUrl: 'https://moviebox.ph',
-    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.4'
+    logo: 'https://moviebox.ph/favicon.ico', type: 'movie', version: '1.0.5'
   };
 }
 
@@ -302,25 +302,24 @@ function getHome(opts) {
     { id: '8434602210994128512', title: 'Anime' }
   ];
   return _ensureAuth().then(function () {
-    return Promise.all(rows.map(function (row) {
+    // Fetch rows ONE AT A TIME. flutter_js/QuickJS is single-threaded and its
+    // async fetch-resolve isn't reentrant — firing 5 fetches in parallel races
+    // the bridge and intermittently corrupts response bodies (JSON.parse then
+    // throws → empty rows → "couldn't load"). Sequential is reliable.
+    var sections = [];
+    function step(i) {
+      if (i >= rows.length) return sections;
+      var row = rows[i];
       var p = BFF + '/tab/ranking-list?tabId=0&categoryType=' + row.id + '&page=1&perPage=18';
-      // Retry a row that comes back empty: if its first request lost the auth
-      // race (fired before the token landed) or hit a transient timeout, a
-      // second attempt — by now token-in-hand — succeeds.
-      function attempt(n) {
-        return _api(p, null).then(function (j) {
-          var subs = (j && j.data && j.data.subjects) || [];
-          var out = [];
-          for (var i = 0; i < subs.length; i++) { var it = _item(subs[i]); if (it) out.push(it); }
-          if (!out.length) _collect(j && j.data, out, 0); // fallback for other shapes
-          if (!out.length && n < 2) return attempt(n + 1);
-          return { title: row.title, items: _uniqBy(out) };
-        }).catch(function () {
-          return n < 2 ? attempt(n + 1) : { title: row.title, items: [] };
-        });
-      }
-      return attempt(0);
-    }));
+      return _api(p, null).then(function (j) {
+        var subs = (j && j.data && j.data.subjects) || [];
+        var out = [];
+        for (var k = 0; k < subs.length; k++) { var it = _item(subs[k]); if (it) out.push(it); }
+        if (out.length) sections.push({ title: row.title, items: _uniqBy(out) });
+        return step(i + 1);
+      }).catch(function () { return step(i + 1); });
+    }
+    return step(0);
   }).then(function (sections) {
     return sections.filter(function (s) { return s.items.length; });
   }).catch(function () { return []; });
