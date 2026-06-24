@@ -30,7 +30,7 @@ function _main() {
 function getInfo() {
   return {
     name: 'MoviesDrive', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.1'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.2'
   };
 }
 
@@ -45,6 +45,15 @@ function _abs(href, base) { return absUrl(href, base); }
 function _baseOf(url) { return (String(url).match(/^(https?:\/\/[^/]+)/) || [])[1] || ''; }
 function _get(url, ref) {
   return fetch(url, { headers: { 'User-Agent': UA, 'Referer': ref || url } })
+    .then(function (r) { return r.body || ''; }).catch(function () { return ''; });
+}
+// CF-gated GET — route through the native WebView solver (browser:true) for
+// hosts behind Cloudflare bot-protection (hubcloud, gdflix) that 403 a plain
+// HTTP client while letting a real browser through. With browser:true we must
+// NOT send our own User-Agent — the bridge uses the solver's UA, which the
+// cf_clearance is bound to.
+function _cfGet(url) {
+  return fetch(url, { browser: true })
     .then(function (r) { return r.body || ''; }).catch(function () { return ''; });
 }
 function _cleanTitle(raw) {
@@ -241,7 +250,7 @@ function _hubcloud(url) {
   var base = _baseOf(url);
   var step1 = /hubcloud\.\w+\/(?:drive|video)/i.test(url) || url.indexOf('hubcloud.php') !== -1
     ? Promise.resolve(url)
-    : _get(url).then(function (html) {
+    : _cfGet(url).then(function (html) {
         var raw = (html.match(/id=["']download["'][^>]*href="([^"]+)"/i) ||
                    html.match(/href="([^"]+)"[^>]*id=["']download["']/i) ||
                    html.match(/<a[^>]+class="[^"]*btn[^"]*"[^>]+href="([^"]+)"/i) || [])[1] || '';
@@ -249,7 +258,7 @@ function _hubcloud(url) {
       });
   return step1.then(function (href) {
     if (!href) return [];
-    return _get(href).then(function (doc) {
+    return _cfGet(href).then(function (doc) {
       var header = htmlText((doc.match(/<div class="card-header[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '');
       var size = htmlText((doc.match(/id=["']size["'][^>]*>([\s\S]*?)<\//i) || [])[1] || '');
       var quality = _quality(header) || _quality(url) || '1080p';
@@ -269,7 +278,7 @@ function _hubServer(link, label, quality, suffix) {
   if (/gofile|gdtot|filepress/i.test(link)) return Promise.resolve(null);
   var name = 'MoviesDrive [' + _serverName(label) + ']' + suffix;
   if (label.indexOf('buzz') !== -1) {
-    return fetch(link + '/download', { headers: { 'Referer': link, 'User-Agent': UA }, followRedirects: false })
+    return fetch(link + '/download', { browser: true, followRedirects: false })
       .then(function (r) { var h = r.headers || {}; var dl = h['hx-redirect'] || h['HX-Redirect'] || ''; return dl ? _src(_baseOf(link) + dl, quality, name) : null; })
       .catch(function () { return null; });
   }
@@ -298,7 +307,7 @@ function _gdflix(url) {
     var base = _baseOf(url);
     var newUrl = (latest && base && latest !== base) ? url.replace(base, latest) : url;
     var b = _baseOf(newUrl);
-    return _get(newUrl).then(function (doc) {
+    return _cfGet(newUrl).then(function (doc) {
       var fileName = _trim((doc.match(/list-group-item[^>]*>\s*Name\s*:\s*([\s\S]*?)<\//i) || [])[1] || '');
       var size = _trim((doc.match(/list-group-item[^>]*>\s*Size\s*:\s*([\s\S]*?)<\//i) || [])[1] || '');
       var quality = _quality(fileName) || _quality(url) || '1080p';
@@ -328,14 +337,14 @@ function _gdServer(link, text, base, quality, suffix) {
   }
   if (t.indexOf('FAST CLOUD') !== -1) {
     var fc = /^https?:/i.test(link) ? link : (base + link);
-    return _get(fc).then(function (d2) {
+    return _cfGet(fc).then(function (d2) {
       var dl = (d2.match(/<div class="card-body"[\s\S]*?<a[^>]+href="([^"]+)"/i) || [])[1] || '';
       return dl ? _src(dl, quality, name('Fast Cloud')) : null;
     }).catch(function () { return null; });
   }
   if (t.indexOf('INSTANT') !== -1) {
     var il = /^https?:/i.test(link) ? link : (base + link);
-    return fetch(il, { headers: { 'User-Agent': UA }, followRedirects: false }).then(function (r) {
+    return fetch(il, { browser: true, followRedirects: false }).then(function (r) {
       var loc = (r.headers && (r.headers['location'] || r.headers['Location'])) || '';
       var fin2 = loc.indexOf('url=') !== -1 ? loc.split('url=').pop() : loc;
       return fin2 ? _src(fin2, quality, name('Instant')) : null;

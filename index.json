@@ -68,7 +68,7 @@
     {
       "id": "moviesdrive",
       "name": "MoviesDrive",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "type": "movie",
       "lang": "hi",
       "file": "providers/moviesdrive.js",
