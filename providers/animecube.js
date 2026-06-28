@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'AnimeCube', lang: 'zh', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.3' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.4' };
 }
 
 function _get(url, ref) {
@@ -258,8 +258,13 @@ function _dailymotion(privateId, quality, slug) {
     // a cross-host subtitle group (www.dailymotion.com) + fMP4 variants, and the
     // open fails ("Failed to open"). So we fetch the master ourselves and return
     // each variant's media playlist DIRECTLY — a single host, no subtitle group,
-    // the clean shape mpv plays reliably. Cap at 1080p so the default (the
-    // highest) isn't a stall-prone 4K rendition.
+    // the clean shape mpv plays reliably.
+    //
+    // Cap at 720p. The app's default-quality is "highest", and 1080p fMP4
+    // segments are ~1.8MB/3s — heavy enough that the first buffer is slow AND a
+    // forward seek stalls long enough to trip the player's stall-failover (which
+    // then thrashes through the other variants). 720p (~0.8MB/3s) starts fast,
+    // seeks cleanly, and leaves 480p/380p as lighter graceful fallbacks.
     return _get(master, dmRef).then(function (m3u8) {
       var lines = String(m3u8 || '').split('\n');
       var out = [];
@@ -270,7 +275,7 @@ function _dailymotion(privateId, quality, slug) {
         var res = line.match(/RESOLUTION=\d+x(\d+)/);
         var q = nm ? nm[1] : (res ? res[1] : '');
         var h = q ? parseInt(q, 10) : 0;
-        if (h && h > 1080) continue; // skip 1440/2160 (heavy; would default to 4K)
+        if (h && h > 720) continue; // skip 1080/1440/2160 — too heavy (slow start + seek-stall)
         var vurl = ((lines[i + 1] || '').trim()).split('#')[0]; // drop #cell=… frag
         if (!vurl || vurl.charAt(0) === '#') continue;
         out.push({ url: vurl, quality: (q ? q + 'p' : (quality || 'auto')),
