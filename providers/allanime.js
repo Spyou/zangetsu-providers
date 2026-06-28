@@ -33,7 +33,7 @@ function _post(query, variables) {
 }
 
 function getInfo() {
-  return { name: 'AllAnime', lang: 'en', baseUrl: 'https://allanime.to', logo: 'https://allanime.to/favicon.ico', type: 'anime', version: '1.0.3' };
+  return { name: 'AllAnime', lang: 'en', baseUrl: 'https://allanime.to', logo: 'https://allanime.to/favicon.ico', type: 'anime', version: '1.0.4' };
 }
 
 // ── Episode thumbnails (Kitsu, keyed by the show's malId) ────────────────────
@@ -234,25 +234,42 @@ function getVideoSources(episodeUrl) {
   var m = String(episodeUrl).replace('allanime://', '').split('/');
   var showId = m[0], mode = (m[1] === 'dub') ? 'dub' : 'sub', epNo = m[2];
   return _fetchSourceUrls(showId, mode, epNo).then(function (sourceUrls) {
-    var SKIP = { 'Ss-Hls': 1 };                       // dead host
-    var EMBED = { 'Ok': 1, 'Mp4': 1, 'Sl-mp4': 1 };   // resolve via extractVideo
+    var SKIP = { 'Ss-Hls': 1 }; // dead host
+    var hdr = { 'Referer': REFERER, 'User-Agent': UA };
+    // Resolve in PRIORITY order (desc) so the best source — usually the direct
+    // `Yt-mp4` on AllAnime's own CDN (a real, range-streamable .mp4) — is the
+    // first one ready, which is what the player's fast-start picks.
+    var list = sourceUrls.slice().sort(function (a, b) {
+      return (b.priority || 0) - (a.priority || 0);
+    });
     var jobs = [];
-    for (var i = 0; i < sourceUrls.length; i++) {
-      var su = sourceUrls[i]; var name = su.sourceName || ''; var raw = String(su.sourceUrl || '');
+    for (var i = 0; i < list.length; i++) {
+      var su = list[i]; var name = su.sourceName || ''; var raw = String(su.sourceUrl || '');
+      var type = su.sourceName ? (su.type || '') : '';
       if (SKIP[name]) continue;
-      if (EMBED[name] && /^https?:\/\//.test(raw)) {
-        jobs.push(extractVideo(raw, { headers: { 'Referer': REFERER, 'User-Agent': UA }, kind: mode, audioLang: mode === 'dub' ? 'en' : 'ja' }).catch(function () { return []; }));
-        continue;
-      }
+      // 1. AllAnime-internal clock endpoint (`--`-obfuscated) → its links API.
       if (raw.indexOf('--') === 0) {
         var path = decodeSourceUrl(raw);
-        if (path.indexOf('/apivtwo/clock') !== -1) jobs.push(_resolveClock(path, mode).catch(function () { return []; }));
-      } else if (/^https?:\/\//.test(raw)) {
-        jobs.push(Promise.resolve([{ url: raw, quality: '', container: /\.m3u8/.test(raw) ? 'hls' : 'mp4',
-          headers: { 'Referer': REFERER, 'User-Agent': UA }, kind: mode, audioLang: mode === 'dub' ? 'en' : 'ja', subtitles: [] }]));
+        if (path.indexOf('/clock') !== -1) {
+          jobs.push(_resolveClock(path, mode).catch(function () { return []; }));
+        }
+        continue;
+      }
+      if (!/^https?:\/\//.test(raw)) continue;
+      // 2. A `player` source (or a bare media file) is a DIRECT stream — use it
+      //    as-is. Everything else is an iframe EMBED: run the host extractors
+      //    (ok.ru / mp4upload / streamlare / …). Unsupported embed hosts return
+      //    [] instead of being mis-added as a broken "mp4" (which black-screened
+      //    the player). `type:'player'` is AllAnime's own direct-CDN marker.
+      if (type === 'player' || /\.(m3u8|mp4)(\?|$)/i.test(raw)) {
+        jobs.push(Promise.resolve([{ url: raw, quality: su.resolutionStr || '',
+          container: /\.m3u8/i.test(raw) ? 'hls' : 'mp4', headers: hdr,
+          kind: mode, audioLang: mode === 'dub' ? 'en' : 'ja', subtitles: [] }]));
+      } else {
+        jobs.push(extractVideo(raw, { headers: hdr, kind: mode, audioLang: mode === 'dub' ? 'en' : 'ja' }).catch(function () { return []; }));
       }
     }
-    var deadline = (typeof globalThis.__allanimeDeadlineMs === 'number') ? globalThis.__allanimeDeadlineMs : 5000;
+    var deadline = (typeof globalThis.__allanimeDeadlineMs === 'number') ? globalThis.__allanimeDeadlineMs : 6000;
     return _settleWithDeadline(jobs, deadline).then(function (all) {
       if (all.length === 0) throw new Error('AllAnime: no playable sources');
       return all;
