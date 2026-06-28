@@ -73,6 +73,15 @@
       "lang": "en",
       "file": "providers/animekai.js",
       "nsfw": false
+    },
+    {
+      "id": "animecube",
+      "name": "AnimeCube",
+      "version": "1.0.0",
+      "type": "anime",
+      "lang": "zh",
+      "file": "providers/animecube.js",
+      "nsfw": false
     }
   ]
 }
