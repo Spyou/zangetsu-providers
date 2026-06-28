@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'AnimeCube', lang: 'zh', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.4' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.5' };
 }
 
 function _get(url, ref) {
@@ -260,11 +260,12 @@ function _dailymotion(privateId, quality, slug) {
     // each variant's media playlist DIRECTLY — a single host, no subtitle group,
     // the clean shape mpv plays reliably.
     //
-    // Cap at 720p. The app's default-quality is "highest", and 1080p fMP4
-    // segments are ~1.8MB/3s — heavy enough that the first buffer is slow AND a
-    // forward seek stalls long enough to trip the player's stall-failover (which
-    // then thrashes through the other variants). 720p (~0.8MB/3s) starts fast,
-    // seeks cleanly, and leaves 480p/380p as lighter graceful fallbacks.
+    // Return up to 1080p as separate quality options (default = highest = 1080p;
+    // the user can drop to 720p/480p in the player's quality menu). NOTE: these
+    // are fMP4 HLS — mpv seeks them by reading sequentially (Dailymotion offers
+    // no progressive-MP4 or TS variant), so a long forward seek buffers a while;
+    // higher quality = more data per seek. We skip 1440/2160 (would default to
+    // 4K — needlessly heavy for donghua) but keep 1080p as the user asked.
     return _get(master, dmRef).then(function (m3u8) {
       var lines = String(m3u8 || '').split('\n');
       var out = [];
@@ -275,7 +276,7 @@ function _dailymotion(privateId, quality, slug) {
         var res = line.match(/RESOLUTION=\d+x(\d+)/);
         var q = nm ? nm[1] : (res ? res[1] : '');
         var h = q ? parseInt(q, 10) : 0;
-        if (h && h > 720) continue; // skip 1080/1440/2160 — too heavy (slow start + seek-stall)
+        if (h && h > 1080) continue; // skip 1440/2160 (would default to a 4K rendition)
         var vurl = ((lines[i + 1] || '').trim()).split('#')[0]; // drop #cell=… frag
         if (!vurl || vurl.charAt(0) === '#') continue;
         out.push({ url: vurl, quality: (q ? q + 'p' : (quality || 'auto')),
