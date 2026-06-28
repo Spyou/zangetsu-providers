@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'AnimeCube', lang: 'zh', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.1' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.2' };
 }
 
 function _get(url, ref) {
@@ -69,11 +69,14 @@ function _cards(rsc) {
     var gm = o.match(/"genres":\[([^\]]*)\]/);
     if (gm) genres = (gm[1].match(/"([^"]+)"/g) || []).map(function (x) { return x.replace(/"/g, ''); });
     var year = _field(o, 'year');
+    var rm = o.match(/"rating":\s*([0-9.]+)/);
+    var um = o.match(/"(?:lastEpisodeAddedAt|latestEpisodePublishedAt|updatedAt)":"([^"]+)"/);
     out.push({
       id: slug, title: _field(o, 'title') || _titleFromSlug(slug),
       cover: _field(o, 'coverImage') || null, url: slug,
       type: 'anime', sourceId: SOURCE_ID,
       genres: genres, year: year ? parseInt(year, 10) : null,
+      rating: rm ? parseFloat(rm[1]) : 0, updatedAt: um ? um[1] : '',
     });
   }
   return out;
@@ -88,12 +91,35 @@ function getHome(opts) {
   return _get(SITE + '/').then(function (html) {
     var cards = _cards(_rsc(html));
     if (!cards.length) return [];
-    return [{ title: 'Donghua', items: cards }];
+    // The app uses row[0] as the hero carousel, so a single row leaves no
+    // content rows below it. Build a few rows from the catalog. The cards
+    // carry rating + last-updated (ISO strings sort chronologically) for
+    // ordering; we slice different sorts so the rows aren't identical.
+    var updated = cards.slice().sort(function (a, b) {
+      return (b.updatedAt || '') < (a.updatedAt || '') ? -1 : ((b.updatedAt || '') > (a.updatedAt || '') ? 1 : 0);
+    });
+    var rated = cards.slice().sort(function (a, b) { return (b.rating || 0) - (a.rating || 0); });
+    var rows = [
+      { title: 'New Episodes', items: updated.slice(0, 24) },
+      { title: 'Top Rated', items: rated.slice(0, 24) },
+      { title: 'All Donghua', items: cards },
+    ];
+    return rows.filter(function (r) { return r.items.length; });
   }).catch(function () { return []; });
 }
 
 function popular(opts) {
-  return getHome(opts).then(function (rows) { return rows.length ? rows[0].items : []; });
+  return getHome(opts).then(function (rows) {
+    // Flatten all rows into a de-duped list for the "popular" surface.
+    var seen = {}, out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var items = rows[i].items;
+      for (var j = 0; j < items.length; j++) {
+        if (!seen[items[j].id]) { seen[items[j].id] = 1; out.push(items[j]); }
+      }
+    }
+    return out;
+  });
 }
 
 // Search: the site has no search API, but its sitemap lists every title (~50),
