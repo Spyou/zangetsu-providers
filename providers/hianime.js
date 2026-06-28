@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.7' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.8' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -187,8 +187,16 @@ function getHome(opts) {
   }).catch(function () { return []; });
 }
 
-// Episode url packs the chosen category + its player link, resolved lazily.
-function _epUrl(cat, playerUrl) { return 'hianime://' + cat + '|' + encodeURIComponent(playerUrl || ''); }
+// Episode url packs the category FIRST as a `/sub//dub/` PATH segment (so the
+// player's in-place Sub/Dub switch — which rewrites that segment — actually
+// works), then BOTH the sub and dub player links so getVideoSources resolves
+// whichever language the player asks for, with no re-fetch. The old `cat|link`
+// form had no `/sub//dub/` segment, so switching to Dub re-resolved the SAME
+// sub link ("changed dub, still sub").
+function _epUrl(cat, subP, dubP, n) {
+  return 'hianime://' + cat + '/' + encodeURIComponent(subP || '') + '/'
+    + encodeURIComponent(dubP || '') + '/' + n;
+}
 
 function getDetail(url, opts) {
   var slug = String(url);
@@ -224,12 +232,17 @@ function getDetail(url, opts) {
       var out = [];
       for (var i = 0; i < eps.length; i++) {
         var ep = eps[i];
-        var link = (ep.link && ep.link[cat]) || [];
-        var player = link[0];
-        if (!player) continue; // no stream for this category
+        var elk = ep.link || {};
+        var subP = (elk.sub || [])[0] || '';
+        var dubP = (elk.dub || [])[0] || '';
+        if (!subP && !dubP) continue; // no stream at all
         var n = ep.episodeNumber != null ? ep.episodeNumber : (i + 1);
+        // Lead with the requested category when it has a link (so playback
+        // opens in the right language); the player can flip to the other.
+        var initCat = ((cat === 'dub' && dubP) || (cat === 'sub' && !subP))
+          ? 'dub' : 'sub';
         out.push({ id: cat + ':' + n, number: n,
-          title: ep.title || ('Episode ' + n), url: _epUrl(cat, player) });
+          title: ep.title || ('Episode ' + n), url: _epUrl(initCat, subP, dubP, n) });
       }
       base.episodes = out;
       // Best-effort: fill in real episode stills from Jikan by mal_id. Never
@@ -252,9 +265,22 @@ function getEpisodes(url, opts) { return getDetail(url, opts).then(function (d) 
 // player link → MegaPlay file id → getSources (plain m3u8 + subtitle tracks).
 function getVideoSources(episodeUrl) {
   var raw = String(episodeUrl).replace('hianime://', '');
-  var cut = raw.indexOf('|');
-  var cat = cut > -1 ? raw.slice(0, cut) : 'sub';
-  var player = cut > -1 ? decodeURIComponent(raw.slice(cut + 1)) : '';
+  var cat, player;
+  if (raw.indexOf('|') > -1) {
+    // Legacy url (hianime://<cat>|<encPlayer>) — keep old Continue-Watching /
+    // resume entries playable.
+    var cut = raw.indexOf('|');
+    cat = (raw.slice(0, cut) === 'dub') ? 'dub' : 'sub';
+    player = decodeURIComponent(raw.slice(cut + 1));
+  } else {
+    // hianime://<cat>/<encSubPlayer>/<encDubPlayer>/<num> — pick the link for
+    // the category the player asked for (it rewrites the leading segment).
+    var parts = raw.split('/');
+    cat = (parts[0] === 'dub') ? 'dub' : 'sub';
+    var subP = parts[1] ? decodeURIComponent(parts[1]) : '';
+    var dubP = parts[2] ? decodeURIComponent(parts[2]) : '';
+    player = (cat === 'dub' ? dubP : subP) || subP || dubP;
+  }
   if (!player) return Promise.reject(new Error('HiAnime: no player link'));
 
   return _get(player, SITE + '/').then(function (html) {
