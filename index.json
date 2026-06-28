@@ -5,7 +5,7 @@
     {
       "id": "allanime",
       "name": "AllAnime",
-      "version": "1.0.5",
+      "version": "1.0.4",
       "type": "anime",
       "lang": "en",
       "file": "providers/allanime.js",
@@ -14,7 +14,7 @@
     {
       "id": "fourkhdhub",
       "name": "4K HDHub",
-      "version": "1.0.5",
+      "version": "1.0.4",
       "type": "movie",
       "lang": "en",
       "file": "providers/fourkhdhub.js",
