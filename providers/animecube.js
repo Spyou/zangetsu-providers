@@ -3,9 +3,10 @@
 // Next.js App Router site: listings come from the server-rendered RSC payload
 // (no clean list API) + the sitemap for search; episode streams come from a
 // plaintext JSON API (`/api/anime/<slug>/episode/<epSlug>/sources`) that returns
-// `{platform, videoId}` for Rumble / Dailymotion. Rumble resolves to a plain
-// m3u8 (Dailymotion copies are private → skipped). Chinese audio + subs only —
-// there is no dub on this site.
+// `{platform, videoId, privateId}` for Dailymotion (the primary host) / Rumble.
+// Both resolve to a plain HLS m3u8: Dailymotion via its GEO endpoint with the
+// animecube embedder + the privateId; Rumble via its embedJS API. Chinese audio
+// + subs only — there is no dub on this site.
 
 var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'animecube';
@@ -16,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'AnimeCube', lang: 'zh', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.0' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.1' };
 }
 
 function _get(url, ref) {
@@ -193,9 +194,12 @@ function getVideoSources(episodeUrl) {
       var jobs = [];
       for (var i = 0; i < list.length; i++) {
         var s = list[i];
-        // Rumble resolves to a plain m3u8. Dailymotion copies are author-private
-        // (DM010) so they can't be played — skip them.
-        if (s && s.platform === 'rumble' && s.videoId) {
+        if (!s || !s.platform) continue;
+        if (s.platform === 'dailymotion' && (s.privateId || s.videoId)) {
+          // Dailymotion videos are embed-restricted to animecube.live; the geo
+          // endpoint serves the HLS manifest when the matching `embedder` is set.
+          jobs.push(_dailymotion(s.privateId || s.videoId, s.quality, slug));
+        } else if (s.platform === 'rumble' && s.videoId) {
           jobs.push(_rumble(s.videoId, s.quality));
         }
       }
@@ -207,6 +211,34 @@ function getVideoSources(episodeUrl) {
       });
     });
   });
+}
+
+// Dailymotion: the site's primary host. Videos are restricted to the
+// animecube.live embedder, so the public metadata API 403s (DM010); the GEO
+// endpoint with the matching `embedder` returns the HLS manifest. Use the
+// `privateId` (the embed key) as the video id.
+function _dailymotion(privateId, quality, slug) {
+  if (!privateId) return Promise.resolve([]);
+  var u = 'https://geo.dailymotion.com/video/' + encodeURIComponent(privateId)
+    + '.json?legacy=true&embedder=' + encodeURIComponent(SITE + '/anime/' + slug);
+  return _json(u, 'https://geo.dailymotion.com/').then(function (j) {
+    if (!j || j.error) return [];
+    var ql = j.qualities || {};
+    var hdr = { 'User-Agent': UA, 'Referer': 'https://geo.dailymotion.com/' };
+    var out = [];
+    for (var q in ql) {
+      var arr = ql[q] || [];
+      for (var i = 0; i < arr.length; i++) {
+        var url = arr[i] && arr[i].url;
+        if (!url) continue;
+        var isHls = (arr[i].type && arr[i].type.indexOf('mpegURL') !== -1) || /\.m3u8/i.test(url);
+        out.push({ url: url, quality: (q === 'auto' ? (quality || 'auto') : q + 'p'),
+          container: isHls ? 'hls' : 'mp4', headers: hdr, kind: 'sub', audioLang: 'zh', subtitles: [] });
+        if (q === 'auto') break; // the auto/HLS entry covers all renditions
+      }
+    }
+    return out;
+  }).catch(function () { return []; });
 }
 
 function _rumble(videoId, quality) {

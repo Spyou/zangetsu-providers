@@ -77,7 +77,7 @@
     {
       "id": "animecube",
       "name": "AnimeCube",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "type": "anime",
       "lang": "zh",
       "file": "providers/animecube.js",
