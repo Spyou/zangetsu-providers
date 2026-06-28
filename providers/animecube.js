@@ -17,7 +17,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'AnimeCube', lang: 'zh', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.2' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.3' };
 }
 
 function _get(url, ref) {
@@ -247,23 +247,43 @@ function _dailymotion(privateId, quality, slug) {
   if (!privateId) return Promise.resolve([]);
   var u = 'https://geo.dailymotion.com/video/' + encodeURIComponent(privateId)
     + '.json?legacy=true&embedder=' + encodeURIComponent(SITE + '/anime/' + slug);
-  return _json(u, 'https://geo.dailymotion.com/').then(function (j) {
+  var dmRef = 'https://geo.dailymotion.com/';
+  var hdr = { 'User-Agent': UA, 'Referer': dmRef };
+  return _json(u, dmRef).then(function (j) {
     if (!j || j.error) return [];
     var ql = j.qualities || {};
-    var hdr = { 'User-Agent': UA, 'Referer': 'https://geo.dailymotion.com/' };
-    var out = [];
-    for (var q in ql) {
-      var arr = ql[q] || [];
-      for (var i = 0; i < arr.length; i++) {
-        var url = arr[i] && arr[i].url;
-        if (!url) continue;
-        var isHls = (arr[i].type && arr[i].type.indexOf('mpegURL') !== -1) || /\.m3u8/i.test(url);
-        out.push({ url: url, quality: (q === 'auto' ? (quality || 'auto') : q + 'p'),
-          container: isHls ? 'hls' : 'mp4', headers: hdr, kind: 'sub', audioLang: 'zh', subtitles: [] });
-        if (q === 'auto') break; // the auto/HLS entry covers all renditions
+    var master = ql.auto && ql.auto[0] && ql.auto[0].url;
+    if (!master) return [];
+    // The player (libmpv) cannot open Dailymotion's MASTER playlist: it carries
+    // a cross-host subtitle group (www.dailymotion.com) + fMP4 variants, and the
+    // open fails ("Failed to open"). So we fetch the master ourselves and return
+    // each variant's media playlist DIRECTLY — a single host, no subtitle group,
+    // the clean shape mpv plays reliably. Cap at 1080p so the default (the
+    // highest) isn't a stall-prone 4K rendition.
+    return _get(master, dmRef).then(function (m3u8) {
+      var lines = String(m3u8 || '').split('\n');
+      var out = [];
+      for (var i = 0; i < lines.length; i++) {
+        var line = (lines[i] || '').trim();
+        if (line.indexOf('#EXT-X-STREAM-INF') !== 0) continue;
+        var nm = line.match(/NAME="?(\d{3,4})"?/);
+        var res = line.match(/RESOLUTION=\d+x(\d+)/);
+        var q = nm ? nm[1] : (res ? res[1] : '');
+        var h = q ? parseInt(q, 10) : 0;
+        if (h && h > 1080) continue; // skip 1440/2160 (heavy; would default to 4K)
+        var vurl = ((lines[i + 1] || '').trim()).split('#')[0]; // drop #cell=… frag
+        if (!vurl || vurl.charAt(0) === '#') continue;
+        out.push({ url: vurl, quality: (q ? q + 'p' : (quality || 'auto')),
+          container: 'hls', headers: hdr, kind: 'sub', audioLang: 'zh', subtitles: [] });
       }
-    }
-    return out;
+      if (out.length) return out;
+      // Master had no parseable variants — fall back to the master itself.
+      return [{ url: master, quality: quality || 'auto', container: 'hls',
+        headers: hdr, kind: 'sub', audioLang: 'zh', subtitles: [] }];
+    }).catch(function () {
+      return [{ url: master, quality: quality || 'auto', container: 'hls',
+        headers: hdr, kind: 'sub', audioLang: 'zh', subtitles: [] }];
+    });
   }).catch(function () { return []; });
 }
 
