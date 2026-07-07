@@ -12,6 +12,15 @@
       "nsfw": false
     },
     {
+      "id": "anikoto",
+      "name": "AniKoto",
+      "version": "1.0.0",
+      "type": "anime",
+      "lang": "en",
+      "file": "providers/anikoto.js",
+      "nsfw": false
+    },
+    {
       "id": "fourkhdhub",
       "name": "4K HDHub",
       "version": "1.0.4",
