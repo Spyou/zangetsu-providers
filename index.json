@@ -14,7 +14,7 @@
     {
       "id": "anikoto",
       "name": "AniKoto",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "type": "anime",
       "lang": "en",
       "file": "providers/anikoto.js",

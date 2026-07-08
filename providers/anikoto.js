@@ -1,31 +1,32 @@
 // AniKoto — anime source for the Zangetsu provider repo (anikototv.to).
 //
-// anikototv.to is an aniwatch-style site. Search is an HTML page (/filter);
-// a show page (/watch/<slug>) carries the numeric anime id; the episode list
-// (/ajax/episode/list/<id>) gives each episode's realid + sub/dub flags. The
-// realid feeds MegaPlay, whose getSources returns a PLAIN m3u8 + subtitle
-// tracks (no decryption), exactly like the HiAnime provider. Chain:
-//   /filter?keyword=   -> slug
-//   /watch/<slug>      -> anime id (data-id) + metadata
-//   /ajax/episode/list/<id> -> [{ realid, num, sub, dub }]
-//   megaplay.buzz/stream/s-2/<realid>/<cat> -> data-id
-//   megaplay.buzz/stream/getSources?id=<data-id> -> m3u8 + subs
+// anikototv.to is an aniwatch-style site. Streams are NOT keyed by the episode
+// id — each episode carries an encrypted `data-ids` (server_ids) blob, and the
+// real player is resolved through the site's own two-step server chain, then
+// extracted from MegaPlay (plain m3u8 + subtitle tracks, no decryption):
+//   /filter?keyword=            -> slug
+//   /watch/<slug>               -> anime id (data-id) + metadata
+//   /ajax/episode/list/<id>     -> [{ data-id, num, sub, dub, data-ids(server_ids) }]
+//   /ajax/server/list?servers=<server_ids> -> server list (VidPlay/HD/Vidstream/…)
+//   /ajax/server?get=<link_id>  -> { url: <megaplay embed>, skip_data }
+//   megaplay.buzz/stream/getSources?id=<embed data-id> -> m3u8 + subs
 //
-// getHome uses the site's own JSON API (anikotoapi.site) for a clean "recent"
-// row; slugs are shared with the site, so its cards resolve through getDetail.
+// Home = /home spotlight (hero) + recent from the JSON API (anikotoapi.site);
+// slugs are shared with the site, so those cards resolve through getDetail.
 
 var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'anikoto';
 
 var SITE = 'https://anikototv.to';
 var API = 'https://anikotoapi.site';
-var MEGA = 'https://megaplay.buzz';
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+// Hosts whose /stream/getSources returns a plain m3u8 (MegaPlay + its clone).
+var MEGA_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:megaplay\.[a-z]+|vidwish\.[a-z]+)/i;
 
 function getInfo() {
   return { name: 'AniKoto', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.0' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.1' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -43,12 +44,12 @@ function _json(url, ref) {
     var j; try { j = JSON.parse(b || 'null'); } catch (e) { j = null; } return j;
   });
 }
-// The /ajax routes wrap their HTML in { status, result }.
-function _ajaxHtml(url) {
-  return _get(url, SITE + '/', true).then(function (b) {
-    var j; try { j = JSON.parse(b || 'null'); } catch (e) { j = null; }
-    return (j && typeof j.result === 'string') ? j.result : '';
-  });
+// The site's /ajax routes wrap their payload in { status, result }. `result` is
+// an HTML string (episode/server list) or an object (server?get).
+function _ajax(path) {
+  return _get(SITE + path, SITE + '/', true).then(function (b) {
+    var j; try { j = JSON.parse(b || 'null'); } catch (e) { j = null; } return j;
+  }).catch(function () { return null; });
 }
 
 function _year(s) { var m = String(s || '').match(/(19|20)\d{2}/); return m ? m[0] : null; }
@@ -64,8 +65,6 @@ function search(query, page, opts) {
   var url = SITE + '/filter?keyword=' + encodeURIComponent(q) + '&page=' + (page || 1);
   return _get(url, SITE + '/').then(function (html) {
     var out = [], seen = {};
-    // Each result is a `<div class="item">…</div>` block; split on the opening
-    // tag and pull slug / title / poster out of each chunk.
     var chunks = html.split('<div class="item');
     for (var i = 1; i < chunks.length; i++) {
       var c = chunks[i];
@@ -83,27 +82,56 @@ function search(query, page, opts) {
   }).catch(function () { return []; });
 }
 
-// ── Home: recent updates from the JSON API (slugs shared with the site) ─────
+// ── Home: /home spotlight (hero) + recent from the JSON API ──────────────────
 function _apiCard(a) {
   if (!a || !a.slug) return null;
   return { id: a.slug, title: a.title || a.alternative || a.slug, url: a.slug,
     cover: a.poster || null, type: 'anime', sourceId: SOURCE_ID,
     subCount: a.is_sub ? 1 : 0, dubCount: 0 };
 }
+function _spotlight(html) {
+  var out = [], seen = {}, chunks = html.split('swiper-slide item');
+  for (var i = 1; i < chunks.length; i++) {
+    var c = chunks[i];
+    var slug = _slugFromWatch((c.match(/href="([^"]*\/watch\/[^"]+)"/) || [])[1]);
+    if (!slug || seen[slug]) continue;
+    var title = (c.match(/class="title d-title"[^>]*>\s*([^<]+?)\s*</) || [])[1]
+      || (c.match(/data-jp="([^"]+)"/) || [])[1];
+    if (!title) continue;
+    var img = (c.match(/background-image:\s*url\(([^)]+)\)/)
+      || c.match(/<img[^>]+data-src="([^"]+)"/) || c.match(/<img[^>]+src="([^"]+)"/) || [])[1];
+    if (img) img = img.replace(/^['"]|['"]$/g, '');
+    seen[slug] = 1;
+    out.push({ id: slug, title: htmlText(title).trim(), url: slug,
+      cover: img || null, type: 'anime', sourceId: SOURCE_ID });
+  }
+  return out;
+}
 function getHome(opts) {
-  return _json(API + '/recent-anime?page=1&per_page=24').then(function (j) {
-    var rows = (j && j.data) || [];
-    var items = [];
-    for (var i = 0; i < rows.length; i++) { var c = _apiCard(rows[i]); if (c) items.push(c); }
-    return items.length ? [{ title: 'Recently Updated', items: items }] : [];
-  }).catch(function () { return []; });
+  return _get(SITE + '/home', SITE + '/').then(function (html) {
+    var rows = [];
+    var spot = _spotlight(html);
+    if (spot.length) rows.push({ title: 'Spotlight', items: spot });
+    return rows;
+  }).catch(function () { return []; }).then(function (rows) {
+    return _json(API + '/recent-anime?page=1&per_page=24').then(function (j) {
+      var data = (j && j.data) || [], items = [];
+      for (var k = 0; k < data.length; k++) { var cc = _apiCard(data[k]); if (cc) items.push(cc); }
+      if (items.length) rows.push({ title: 'Recently Updated', items: items });
+      return rows;
+    }).catch(function () { return rows; });
+  });
 }
 
 // ── Detail + episodes ───────────────────────────────────────────────────────
 function _cleanTitle(og) {
-  return String(og || '').replace(/^Watch\s+/i, '')
-    .replace(/\s+Anime\s+Online\s*\|.*$/i, '')
-    .replace(/\s*\|\s*Anikoto.*$/i, '').trim();
+  var t = String(og || '');
+  t = t.replace(/\s*[|-]\s*Anikoto.*$/i, '');        // trailing site name
+  t = t.replace(/^Watch\s+/i, '').replace(/^Anime\s+/i, ''); // leading fluff
+  t = t.replace(/\s+Anime\s+Online.*$/i, '');         // "X Anime Online …"
+  t = t.replace(/\s+Watch\s+Online.*$/i, '');         // "X Watch Online Free"
+  t = t.replace(/\s+Online\s+(with|free)\b.*$/i, ''); // "X Online with SUB/DUB"
+  return t.trim();
 }
 function _genres(html) {
   var g = [], re = /href="[^"]*\/genre\/[^"]*"[^>]*>([^<]+)</g, m;
@@ -113,11 +141,12 @@ function _genres(html) {
   return g;
 }
 
-// Episode url: anikoto://<cat>/<realid>/<sub><dub>/<num>. The player rewrites
-// the leading <cat> segment for its Sub/Dub toggle, so getVideoSources just
-// rebuilds the MegaPlay embed for whichever category it is handed.
-function _epUrl(cat, realid, sub, dub, num) {
-  return 'anikoto://' + cat + '/' + realid + '/' + (sub ? 1 : 0) + (dub ? 1 : 0) + '/' + num;
+// Episode url: anikoto://<cat>/<encoded server_ids>/<sub><dub>/<num>. The player
+// rewrites the leading <cat> segment for its Sub/Dub toggle; getVideoSources
+// resolves the server list from the (per-episode) server_ids blob.
+function _epUrl(cat, serverIds, sub, dub, num) {
+  return 'anikoto://' + cat + '/' + encodeURIComponent(serverIds) + '/'
+    + (sub ? 1 : 0) + (dub ? 1 : 0) + '/' + num;
 }
 
 function getDetail(url, opts) {
@@ -125,7 +154,10 @@ function getDetail(url, opts) {
   var cat = _mode(opts);
   return _get(SITE + '/watch/' + encodeURIComponent(slug), SITE + '/').then(function (html) {
     var animeId = (html.match(/data-id="(\d+)"/) || [])[1];
-    var title = _cleanTitle((html.match(/og:title"\s+content="([^"]+)"/) || [])[1]) || slug;
+    // The canonical clean title is the <h1 class="… d-title">; og:title is
+    // marketing fluff ("Watch X Anime Online Free"), used only as a fallback.
+    var title = htmlText((html.match(/<h1[^>]*class="[^"]*d-title[^"]*"[^>]*>([^<]+)<\/h1>/) || [])[1] || '').trim()
+      || _cleanTitle((html.match(/og:title"\s+content="([^"]+)"/) || [])[1]) || slug;
     var poster = (html.match(/og:image"\s+content="([^"]+)"/) || [])[1] || null;
     var synopsis = (html.match(/class="synopsis[^"]*"[^>]*>([\s\S]*?)<\/div>/) || [])[1] || '';
     var base = {
@@ -135,13 +167,14 @@ function getDetail(url, opts) {
       episodes: [], year: _year(html), malId: null, subCount: 0, dubCount: 0
     };
     if (!animeId) return base;
-    return _ajaxHtml(SITE + '/ajax/episode/list/' + animeId).then(function (lhtml) {
+    return _ajax('/ajax/episode/list/' + animeId).then(function (j) {
+      var lhtml = (j && typeof j.result === 'string') ? j.result : '';
       var out = [], subN = 0, dubN = 0, mal = null;
       var re = /<a\b([^>]*\bdata-id="\d+"[^>]*)>/g, m;
       while ((m = re.exec(lhtml)) !== null) {
         var attrs = m[1];
-        var realid = (attrs.match(/data-id="(\d+)"/) || [])[1];
-        if (!realid) continue;
+        var serverIds = (attrs.match(/data-ids="([^"]+)"/) || [])[1];
+        if (!serverIds) continue; // no servers → not playable
         var num = parseInt((attrs.match(/data-num="(\d+)"/) || [])[1] || '0', 10);
         var sub = (attrs.match(/data-sub="(\d+)"/) || [])[1] === '1';
         var dub = (attrs.match(/data-dub="(\d+)"/) || [])[1] === '1';
@@ -153,7 +186,7 @@ function getDetail(url, opts) {
         var title2 = (attrs.match(/title="([^"]+)"/) || [])[1];
         out.push({ id: cat + ':' + num, number: num,
           title: title2 ? htmlText(title2).trim() : ('Episode ' + num),
-          url: _epUrl(initCat, realid, sub, dub, num) });
+          url: _epUrl(initCat, serverIds, sub, dub, num) });
       }
       base.episodes = out;
       base.subCount = subN;
@@ -166,18 +199,66 @@ function getDetail(url, opts) {
 
 function getEpisodes(url, opts) { return getDetail(url, opts).then(function (d) { return d.episodes; }); }
 
-// ── Streams: MegaPlay embed → getSources (plain m3u8 + subtitle tracks) ──────
+// ── Streams: server_ids → server list → server?get → MegaPlay getSources ─────
+function _parseServers(html) {
+  var servers = [], re = /data-type="(\w+)"([\s\S]*?)(?=data-type="|$)/g, tm;
+  while ((tm = re.exec(html)) !== null) {
+    var type = tm[1], block = tm[2], lm, lre = /data-link-id="([^"]+)"[^>]*>([^<]*)</g;
+    while ((lm = lre.exec(block)) !== null) {
+      servers.push({ type: type, linkId: lm[1], name: (lm[2] || '').trim() });
+    }
+  }
+  return servers;
+}
+// Prefer MegaPlay-backed servers (Vidstream/HD → megaplay.buzz) — plain m3u8.
+function _srvRank(name) {
+  var n = String(name || '').toLowerCase();
+  if (n.indexOf('vidstream') > -1) return 0;
+  if (n.indexOf('hd') > -1) return 1;
+  if (n.indexOf('vidcloud') > -1) return 2;
+  return 5;
+}
+
 function getVideoSources(episodeUrl) {
   var raw = String(episodeUrl).replace('anikoto://', '');
   var parts = raw.split('/');
   var cat = (parts[0] === 'dub') ? 'dub' : 'sub';
-  var realid = parts[1];
-  if (!realid) return Promise.reject(new Error('AniKoto: no episode id'));
+  var serverIds = parts[1] ? decodeURIComponent(parts[1]) : '';
+  if (!serverIds) return Promise.reject(new Error('AniKoto: no server ids'));
 
-  var embed = MEGA + '/stream/s-2/' + realid + '/' + cat;
+  return _ajax('/ajax/server/list?servers=' + encodeURIComponent(serverIds)).then(function (j) {
+    var lhtml = (j && typeof j.result === 'string') ? j.result : '';
+    var servers = _parseServers(lhtml);
+    var want = [];
+    for (var i = 0; i < servers.length; i++) {
+      var s = servers[i];
+      var ok = (cat === 'dub') ? (s.type === 'dub') : (s.type === 'sub' || s.type === 'hsub');
+      if (ok) want.push(s);
+    }
+    if (!want.length) want = servers;
+    want.sort(function (a, b) { return _srvRank(a.name) - _srvRank(b.name); });
+    return _tryServers(want, 0, cat);
+  });
+}
+
+// Resolve servers in preference order; take the first that yields a MegaPlay
+// (or clone) embed, then extract its m3u8.
+function _tryServers(list, i, cat) {
+  if (i >= list.length) return Promise.reject(new Error('AniKoto: no playable server'));
+  return _ajax('/ajax/server?get=' + encodeURIComponent(list[i].linkId)).then(function (j) {
+    var url = j && j.result && (typeof j.result === 'object' ? j.result.url : null);
+    if (url && MEGA_RE.test(url)) return _extractMega(url, cat);
+    return _tryServers(list, i + 1, cat);
+  }).catch(function () { return _tryServers(list, i + 1, cat); });
+}
+
+// MegaPlay embed page → data-id → getSources (plain m3u8 + subtitle tracks).
+function _extractMega(embed, cat) {
+  var base = (embed.match(/^(https?:\/\/[^/]+)/) || [])[1] || 'https://megaplay.buzz';
   return _get(embed, SITE + '/').then(function (mhtml) {
-    var dataId = (mhtml.match(/data-id="(\d+)"/) || [])[1] || realid;
-    return fetch(MEGA + '/stream/getSources?id=' + dataId, {
+    var dataId = (mhtml.match(/data-id="(\d+)"/) || [])[1];
+    if (!dataId) throw new Error('AniKoto: no MegaPlay id');
+    return fetch(base + '/stream/getSources?id=' + dataId, {
       headers: { 'User-Agent': UA, 'Referer': embed, 'X-Requested-With': 'XMLHttpRequest' }
     }).then(function (r) {
       var j; try { j = JSON.parse(r.body || 'null'); } catch (e) { throw new Error('AniKoto: bad getSources'); }
@@ -193,14 +274,13 @@ function getVideoSources(episodeUrl) {
         subs.push({ url: t.file, lang: t.label || 'Sub', label: t.label || 'Sub',
           format: /\.srt(\?|$)/i.test(t.file) ? 'srt' : 'vtt', 'default': !!t['default'] });
       }
-      var hdrs = { 'User-Agent': UA, 'Referer': MEGA + '/', 'Origin': MEGA };
+      var hdrs = { 'User-Agent': UA, 'Referer': base + '/', 'Origin': base };
       var mk = function (u, q) {
         return { url: u, quality: q, container: /\.m3u8(\?|$)/i.test(u) ? 'hls' : 'mp4',
           headers: hdrs, kind: cat, audioLang: cat === 'dub' ? 'en' : 'ja', subtitles: subs };
       };
       if (!/\.m3u8(\?|$)/i.test(file)) return [mk(file, 'auto')];
-      // Adaptive master playlist → expose each rendition for a real quality menu.
-      return fetch(file, { headers: { 'User-Agent': UA, 'Referer': MEGA + '/' } }).then(function (mr) {
+      return fetch(file, { headers: { 'User-Agent': UA, 'Referer': base + '/' } }).then(function (mr) {
         var body = mr.body || '';
         var dir = file.replace(/[^/]*(\?.*)?$/, '');
         var vs = [], m2, re = /#EXT-X-STREAM-INF:[^\n]*?RESOLUTION=\d+x(\d+)[^\n]*\r?\n([^\r\n#]+)/gi;
