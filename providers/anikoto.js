@@ -26,7 +26,7 @@ var MEGA_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:megaplay\.[a-z]+|vidwish\.[a-z]+)
 
 function getInfo() {
   return { name: 'AniKoto', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.2' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.3' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -293,6 +293,45 @@ function _tryServers(list, i, cat) {
 }
 
 // MegaPlay embed page → data-id → getSources (plain m3u8 + subtitle tracks).
+// When the VTT pack encode id differs from the video pack (common on dub),
+// MegaPlay's intro/outro markers on the sibling pack give the post-OP skew so
+// softsubs line up without a user delay preference.
+function _cdnEncodeId(url) {
+  var segs = String(url || '').split('/');
+  var last = null;
+  for (var i = 0; i < segs.length; i++) {
+    if (/^[a-f0-9]{32}$/i.test(segs[i])) last = segs[i];
+  }
+  return last;
+}
+function _siblingEmbed(embed) {
+  return String(embed || '').replace(/\/(dub|sub)(?=\/?($|\?))/i, function (_, x) {
+    return '/' + (String(x).toLowerCase() === 'dub' ? 'sub' : 'dub');
+  });
+}
+function _packSkew(playing, sibling) {
+  if (!playing || !sibling) return null;
+  var skew = null;
+  var after = null;
+  // Prefer intro.end: post-OP content length matches across packs; averaging
+  // with outro.start over-corrects when ED tails differ.
+  if (playing.intro && sibling.intro
+      && typeof playing.intro.end === 'number'
+      && typeof sibling.intro.end === 'number') {
+    skew = playing.intro.end - sibling.intro.end;
+    after = sibling.intro.end;
+  } else if (playing.outro && sibling.outro
+      && typeof playing.outro.start === 'number'
+      && typeof sibling.outro.start === 'number') {
+    skew = playing.outro.start - sibling.outro.start;
+    if (sibling.intro && typeof sibling.intro.end === 'number') {
+      after = sibling.intro.end;
+    }
+  }
+  if (skew == null || Math.abs(skew) < 5 || Math.abs(skew) > 45) return null;
+  return { seconds: skew, afterSeconds: after == null ? 0 : after };
+}
+
 function _extractMega(embed, cat) {
   var base = (embed.match(/^(https?:\/\/[^/]+)/) || [])[1] || 'https://megaplay.buzz';
   return _get(embed, SITE + '/').then(function (mhtml) {
@@ -315,26 +354,64 @@ function _extractMega(embed, cat) {
           format: /\.srt(\?|$)/i.test(t.file) ? 'srt' : 'vtt', 'default': !!t['default'] });
       }
       var hdrs = { 'User-Agent': UA, 'Referer': base + '/', 'Origin': base };
-      var mk = function (u, q) {
-        return { url: u, quality: q, container: /\.m3u8(\?|$)/i.test(u) ? 'hls' : 'mp4',
-          headers: hdrs, kind: cat, audioLang: cat === 'dub' ? 'en' : 'ja', subtitles: subs };
-      };
-      if (!/\.m3u8(\?|$)/i.test(file)) return [mk(file, 'auto')];
-      return fetch(file, { headers: { 'User-Agent': UA, 'Referer': base + '/' } }).then(function (mr) {
-        var body = mr.body || '';
-        var dir = file.replace(/[^/]*(\?.*)?$/, '');
-        var vs = [], m2, re = /#EXT-X-STREAM-INF:[^\n]*?RESOLUTION=\d+x(\d+)[^\n]*\r?\n([^\r\n#]+)/gi;
-        while ((m2 = re.exec(body)) !== null) {
-          var h = parseInt(m2[1], 10);
-          var uri = String(m2[2]).replace(/^\s+|\s+$/g, '');
-          if (!uri) continue;
-          vs.push({ h: h, url: /^https?:/i.test(uri) ? uri : (dir + uri) });
+      var videoEnc = _cdnEncodeId(file);
+      var subEnc = subs.length ? _cdnEncodeId(subs[0].url) : null;
+      var needSibling = videoEnc && subEnc && videoEnc !== subEnc;
+
+      function finish(skew) {
+        var mk = function (u, q) {
+          var o = { url: u, quality: q, container: /\.m3u8(\?|$)/i.test(u) ? 'hls' : 'mp4',
+            headers: hdrs, kind: cat, audioLang: cat === 'dub' ? 'en' : 'ja', subtitles: subs };
+          if (skew) {
+            o.subtitleSkewSeconds = skew.seconds;
+            o.subtitleSkewAfterSeconds = skew.afterSeconds;
+          }
+          return o;
+        };
+        if (!/\.m3u8(\?|$)/i.test(file)) return [mk(file, 'auto')];
+        return fetch(file, { headers: { 'User-Agent': UA, 'Referer': base + '/' } }).then(function (mr) {
+          var body = mr.body || '';
+          var dir = file.replace(/[^/]*(\?.*)?$/, '');
+          var vs = [], m2, re = /#EXT-X-STREAM-INF:[^\n]*?RESOLUTION=\d+x(\d+)[^\n]*\r?\n([^\r\n#]+)/gi;
+          while ((m2 = re.exec(body)) !== null) {
+            var h = parseInt(m2[1], 10);
+            var uri = String(m2[2]).replace(/^\s+|\s+$/g, '');
+            if (!uri) continue;
+            vs.push({ h: h, url: /^https?:/i.test(uri) ? uri : (dir + uri) });
+          }
+          vs.sort(function (a, b) { return b.h - a.h; });
+          var outv = [mk(file, 'auto')];
+          for (var k = 0; k < vs.length; k++) outv.push(mk(vs[k].url, vs[k].h + 'p'));
+          return outv;
+        }).catch(function () { return [mk(file, 'auto')]; });
+      }
+
+      if (!needSibling) return finish(null);
+      var sibEmbed = _siblingEmbed(embed);
+      if (!sibEmbed || sibEmbed === embed) return finish(null);
+      return _get(sibEmbed, SITE + '/').then(function (shtml) {
+        var sid = (shtml.match(/data-id="(\d+)"/) || [])[1];
+        if (!sid) return null;
+        return fetch(base + '/stream/getSources?id=' + sid, {
+          headers: { 'User-Agent': UA, 'Referer': sibEmbed, 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function (sr) {
+          var sj; try { sj = JSON.parse(sr.body || 'null'); } catch (e) { sj = null; }
+          return sj;
+        });
+      }).then(function (sj) {
+        // Prefer intro.end delta (post-OP body length matches across packs).
+        // Dart blends this with the VTT OP-gap delta on fetch (~11s here).
+        var skew = _packSkew(j, sj);
+        if (skew) {
+          try {
+            console.log('[zangetsu-sub-timing] anikoto pack skew '
+              + skew.seconds.toFixed(3) + 's after ' + skew.afterSeconds.toFixed(3)
+              + 's via intro-markers'
+              + ' (video=' + videoEnc + ' vtt=' + subEnc + ')');
+          } catch (e) {}
         }
-        vs.sort(function (a, b) { return b.h - a.h; });
-        var outv = [mk(file, 'auto')];
-        for (var k = 0; k < vs.length; k++) outv.push(mk(vs[k].url, vs[k].h + 'p'));
-        return outv;
-      }).catch(function () { return [mk(file, 'auto')]; });
+        return finish(skew);
+      }).catch(function () { return finish(null); });
     });
   });
 }
