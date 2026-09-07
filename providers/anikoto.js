@@ -3,13 +3,13 @@
 // anikototv.to is an aniwatch-style site. Streams are NOT keyed by the episode
 // id — each episode carries an encrypted `data-ids` (server_ids) blob, and the
 // real player is resolved through the site's own two-step server chain, then
-// extracted from MegaPlay (plain m3u8 + subtitle tracks, no decryption):
+// extracted from the embed host (plain m3u8 + subtitle tracks, no decryption):
 //   /filter?keyword=            -> slug
 //   /watch/<slug>               -> anime id (data-id) + metadata
 //   /ajax/episode/list/<id>     -> [{ data-id, num, sub, dub, data-ids(server_ids) }]
 //   /ajax/server/list?servers=<server_ids> -> server list (VidPlay/HD/Vidstream/…)
-//   /ajax/server?get=<link_id>  -> { url: <megaplay embed>, skip_data }
-//   megaplay.buzz/stream/getSources?id=<embed data-id> -> m3u8 + subs
+//   /ajax/server?get=<link_id>  -> { url: <player embed>, skip_data }
+//   <embed host>/stream/getSources?id=<embed data-id> -> m3u8 + subs
 //
 // Home = /home spotlight (hero) + recent from the JSON API (anikotoapi.site);
 // slugs are shared with the site, so those cards resolve through getDetail.
@@ -21,12 +21,13 @@ var SITE = 'https://anikototv.to';
 var API = 'https://anikotoapi.site';
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
-// Hosts whose /stream/getSources returns a plain m3u8 (MegaPlay + its clone).
-var MEGA_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:megaplay\.[a-z]+|vidwish\.[a-z]+)/i;
+// Hosts whose /stream/getSources returns a plain m3u8. VidPlay (vidtube) is the
+// one still doing so; MegaPlay/VidWish are kept as fallbacks.
+var PLAYER_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:vidtube\.[a-z]+|megaplay\.[a-z]+|vidwish\.[a-z]+)/i;
 
 function getInfo() {
   return { name: 'AniKoto', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.3' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.4' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -250,12 +251,15 @@ function _parseServers(html) {
   }
   return servers;
 }
-// Prefer MegaPlay-backed servers (Vidstream/HD → megaplay.buzz) — plain m3u8.
+// VidPlay (→ vidtube) still hands back a plain m3u8. Vidstream/HD go to
+// megaplay.buzz, whose getSources now returns an encrypted blob instead of a
+// file, so they're only worth trying if VidPlay is missing for an episode.
 function _srvRank(name) {
   var n = String(name || '').toLowerCase();
-  if (n.indexOf('vidstream') > -1) return 0;
-  if (n.indexOf('hd') > -1) return 1;
-  if (n.indexOf('vidcloud') > -1) return 2;
+  if (n.indexOf('vidplay') > -1) return 0;
+  if (n.indexOf('vidstream') > -1) return 1;
+  if (n.indexOf('hd') > -1) return 2;
+  if (n.indexOf('vidcloud') > -1) return 3;
   return 5;
 }
 
@@ -281,18 +285,19 @@ function getVideoSources(episodeUrl) {
   });
 }
 
-// Resolve servers in preference order; take the first that yields a MegaPlay
-// (or clone) embed, then extract its m3u8.
+// Resolve servers in preference order; take the first that yields a known embed
+// host, then extract its m3u8. A host that no longer returns a plain file (see
+// PLAYER_RE) just throws and we fall through to the next server.
 function _tryServers(list, i, cat) {
   if (i >= list.length) return Promise.reject(new Error('AniKoto: no playable server'));
   return _ajax('/ajax/server?get=' + encodeURIComponent(list[i].linkId)).then(function (j) {
     var url = j && j.result && (typeof j.result === 'object' ? j.result.url : null);
-    if (url && MEGA_RE.test(url)) return _extractMega(url, cat);
+    if (url && PLAYER_RE.test(url)) return _extractPlayer(url, cat);
     return _tryServers(list, i + 1, cat);
   }).catch(function () { return _tryServers(list, i + 1, cat); });
 }
 
-// MegaPlay embed page → data-id → getSources (plain m3u8 + subtitle tracks).
+// Embed page → data-id → getSources (plain m3u8 + subtitle tracks).
 // When the VTT pack encode id differs from the video pack (common on dub),
 // MegaPlay's intro/outro markers on the sibling pack give the post-OP skew so
 // softsubs line up without a user delay preference.
@@ -303,6 +308,10 @@ function _cdnEncodeId(url) {
     if (/^[a-f0-9]{32}$/i.test(segs[i])) last = segs[i];
   }
   return last;
+}
+// The sub/hsub/dub cut an embed URL was issued for.
+function _cutOf(embed) {
+  return (String(embed || '').match(/\/(sub|hsub|dub)\/?(?:[?#]|$)/i) || [])[1] || null;
 }
 function _siblingEmbed(embed) {
   return String(embed || '').replace(/\/(dub|sub)(?=\/?($|\?))/i, function (_, x) {
@@ -332,12 +341,16 @@ function _packSkew(playing, sibling) {
   return { seconds: skew, afterSeconds: after == null ? 0 : after };
 }
 
-function _extractMega(embed, cat) {
-  var base = (embed.match(/^(https?:\/\/[^/]+)/) || [])[1] || 'https://megaplay.buzz';
+function _extractPlayer(embed, cat) {
+  var base = (embed.match(/^(https?:\/\/[^/]+)/) || [])[1] || 'https://vidtube.site';
+  // getSources is keyed by the embed's data-id, which is shared across the
+  // sub/hsub/dub cuts — the audio comes from `type`, so carry over the one this
+  // embed was issued for or a dub episode comes back with the sub stream.
+  var type = _cutOf(embed) || cat;
   return _get(embed, SITE + '/').then(function (mhtml) {
     var dataId = (mhtml.match(/data-id="(\d+)"/) || [])[1];
-    if (!dataId) throw new Error('AniKoto: no MegaPlay id');
-    return fetch(base + '/stream/getSources?id=' + dataId, {
+    if (!dataId) throw new Error('AniKoto: no embed id');
+    return fetch(base + '/stream/getSources?id=' + dataId + '&type=' + type, {
       headers: { 'User-Agent': UA, 'Referer': embed, 'X-Requested-With': 'XMLHttpRequest' }
     }).then(function (r) {
       var j; try { j = JSON.parse(r.body || 'null'); } catch (e) { throw new Error('AniKoto: bad getSources'); }
@@ -392,7 +405,10 @@ function _extractMega(embed, cat) {
       return _get(sibEmbed, SITE + '/').then(function (shtml) {
         var sid = (shtml.match(/data-id="(\d+)"/) || [])[1];
         if (!sid) return null;
-        return fetch(base + '/stream/getSources?id=' + sid, {
+        // Same id as the playing cut on hosts that share it, so the cut has to
+        // be carried too or this reads back the pack we already have.
+        return fetch(base + '/stream/getSources?id=' + sid
+          + '&type=' + (_cutOf(sibEmbed) || (type === 'dub' ? 'sub' : 'dub')), {
           headers: { 'User-Agent': UA, 'Referer': sibEmbed, 'X-Requested-With': 'XMLHttpRequest' }
         }).then(function (sr) {
           var sj; try { sj = JSON.parse(sr.body || 'null'); } catch (e) { sj = null; }

@@ -34,7 +34,7 @@ function _domains() {
 function getInfo() {
   return {
     name: '4K HDHub', lang: 'en', baseUrl: 'https://4khdhub.link',
-    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.5'
+    logo: 'https://4khdhub.link/favicon.ico', type: 'movie', version: '1.0.6'
   };
 }
 
@@ -79,8 +79,9 @@ function _cards(html, main) {
 }
 
 function search(query, page, opts) {
+  var p = (page && page > 1) ? ('/page/' + page + '/') : '/';
   return _domains().then(function (d) {
-    return _get(d.main + '/?s=' + encodeURIComponent(query || ''), d.main + '/')
+    return _get(d.main + p + '?s=' + encodeURIComponent(query || ''), d.main + '/')
       .then(function (html) { return _cards(html, d.main); });
   }).catch(function () { return []; });
 }
@@ -109,9 +110,10 @@ function _epHrefs(url) {
   catch (e) { return []; }
 }
 
-// ── TMDB enrichment (keyless proxy) — 4KHDHub itself only exposes release
-// filenames, so episode names/stills + a clean plot/genres come from TMDB. ──
-var _TMDB = 'https://jumpfreedom.com/3';
+// ── TMDB enrichment — 4KHDHub itself only exposes release filenames, so
+// episode names/stills + a clean plot/genres come from TMDB. The host attaches
+// the api_key to every api.themoviedb.org request, so none is passed here. ──
+var _TMDB = 'https://api.themoviedb.org/3';
 var _STILL = 'https://image.tmdb.org/t/p/w300';
 var _POSTER = 'https://image.tmdb.org/t/p/w500';
 
@@ -144,18 +146,20 @@ function getDetail(url, opts) {
         .replace(/<[^>]*>/g, '').split('(')[0];
       title = _trim(title) || _trim((html.match(/<meta property="og:title" content="([^"]+)"/) || [])[1] || 'Untitled');
       var poster = (html.match(/<meta property="og:image" content="([^"]+)"/) || [])[1] || null;
-      var description = htmlText((html.match(/class="content-section"[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/) || [])[1]
+      var description = htmlText((html.match(/<p class="mt-4">([\s\S]*?)<\/p>/) || [])[1]
         || (html.match(/<meta name="description" content="([^"]+)"/) || [])[1] || '')
         .replace(/^watch trailer\s*/i, '');
       var year = (html.match(/\b(19|20)\d{2}\b/) || [])[0] || null;
       var tags = [];
-      var tm; var tre = /class="badge[^"]*"[^>]*>([^<]+)</g;
-      while ((tm = tre.exec(html)) !== null) tags.push(_trim(tm[1]));
-      var isSeries = /season-item|episode-download-item/i.test(html) || tags.join(' ').toLowerCase().indexOf('series') !== -1;
+      var tm; var tre = /class="badge badge-outline"[^>]*>([\s\S]*?)<\/span>/g;
+      while ((tm = tre.exec(html)) !== null) tags.push(htmlText(tm[1]));
+      // Season blocks settle it; the type badge (one per page) covers the rest.
+      var isSeries = /season-item|episode-download-item/i.test(html)
+        || tags.indexOf('Series') !== -1;
       var episodes = isSeries ? _seriesEpisodes(html) : _movieEpisode(html, title);
       // drop release-quality tokens from the scraped genre fallback
       var cleanTags = tags.filter(function (t) {
-        return !/\b\d+(\.\d+)?\s*(GB|MB)\b|WEB-?DL|WEBRIP|BLU-?RAY|\b\d{3,4}p\b|HDR|H\.?26[45]|x26[45]|HEVC|DDP|DTS|AAC|ATMOS/i.test(t);
+        return !/\b\d+(\.\d+)?\s*(GB|MB)\b|WEB-?DL|WEBRIP|BLU-?RAY|\b\d{3,4}p\b|HDR|H\.?26[45]|x26[45]|HEVC|DDP|DTS|AAC|ATMOS|^(Movies|Series)$|\bSDR\b|\bAV1\b|\bREMUX\b|\bVOD\b|\b10\s?Bit\b|\b(Dual|Multi)\b/i.test(t);
       });
 
       var base = {
@@ -224,7 +228,7 @@ function getDetail(url, opts) {
 
 function _movieEpisode(html, title) {
   var hrefs = [], m;
-  var block = (html.match(/class="download-item"[\s\S]*$/) || [])[0] || html;
+  var block = (html.match(/class="download-item[\s\S]*$/) || [])[0] || html;
   var re = /<a[^>]+href="([^"]+)"/g;
   while ((m = re.exec(block)) !== null) {
     var h = m[1];
@@ -329,7 +333,8 @@ function _hubcloud(url) {
       // claiming one. The player hides its quality menu for an unknown stream
       // instead of showing a number that isn't real.
       var quality = _quality(title) || null;
-      var info = { tags: _releaseTags(title), size: size, res: _resLabel(quality), quality: quality };
+      var pxl = (doc.match(/var\s+pxl\s*=\s*["']([^"']+)["']/) || [])[1] || '';
+      var info = { tags: _releaseTags(title), size: size, res: _resLabel(quality), quality: quality, pxl: pxl };
       var jobs = [], m;
       var re = /<a[^>]*href="([^"]+)"[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*>([\s\S]*?)<\/a>|<a[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
       while ((m = re.exec(doc)) !== null) {
@@ -437,9 +442,12 @@ function _hubServer(link, label, info) {
     }).catch(function () { return null; });
   }
   if (label.indexOf('pixeldra') !== -1 || label.indexOf('pixel') !== -1) {
-    var b = (link.match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
-    var fin = link.indexOf('download') !== -1 ? link
-      : (b + '/api/file/' + link.replace(/\/$/, '').split('/').pop() + '?download');
+    // The button's href is a decoy that 404s — the real file id is swapped in
+    // by the script below it, so prefer that when the page carries one.
+    var real = info.pxl || link;
+    var b = (real.match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
+    var fin = real.indexOf('download') !== -1 ? real
+      : (b + '/api/file/' + real.replace(/\/$/, '').split('/').pop() + '?download');
     return Promise.resolve(_src(fin, q, name));
   }
   if (label.indexOf('fsl') !== -1 || label.indexOf('download file') !== -1 ||

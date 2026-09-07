@@ -16,26 +16,27 @@ var DOMAINS_URL = 'https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+// Only used when the domains list itself can't be reached; the live domain
+// always comes from DOMAINS_URL.
+var FALLBACK = 'https://new5.hdhub4u.cl';
+
 var _dom = null;
 function _domains() {
   if (_dom) return Promise.resolve(_dom);
   return fetch(DOMAINS_URL, { headers: { 'User-Agent': UA } }).then(function (r) {
     var j = {}; try { j = JSON.parse(r.body || '{}'); } catch (e) {}
-    _dom = {
-      main: (j['HDHUB4u'] || j['hdhub4u'] || 'https://new2.hdhub4u.limo').replace(/\/$/, ''),
-      hub: (j['hubcloud'] || 'https://hubcloud.foo').replace(/\/$/, '')
-    };
+    _dom = { main: (j['HDHUB4u'] || j['hdhub4u'] || FALLBACK).replace(/\/$/, '') };
     return _dom;
   }).catch(function () {
-    _dom = { main: 'https://new2.hdhub4u.limo', hub: 'https://hubcloud.foo' };
+    _dom = { main: FALLBACK };
     return _dom;
   });
 }
 
 function getInfo() {
   return {
-    name: 'HDHub4u', lang: 'hi', baseUrl: 'https://new2.hdhub4u.limo',
-    logo: 'https://new2.hdhub4u.limo/favicon.ico', type: 'movie', version: '1.2.3'
+    name: 'HDHub4u', lang: 'hi', baseUrl: FALLBACK,
+    logo: FALLBACK + '/favicon.ico', type: 'movie', version: '1.2.4'
   };
 }
 
@@ -145,8 +146,11 @@ function _isLink(h) {
   return /hdstream4u|hubstream|hubcloud|hubdrive|hblinks|pixeldra|gadgets|\?id=/i.test(String(h || ''));
 }
 
-// ── TMDB enrichment (keyless proxy) ──────────────────────────────────────────
-var _TMDB = 'https://jumpfreedom.com/3';
+// ── TMDB enrichment ──────────────────────────────────────────────────────────
+// Straight to TMDB: the keyless proxy this used to go through now answers 429
+// to everything. The host attaches the api_key to every api.themoviedb.org
+// request, so none is passed here.
+var _TMDB = 'https://api.themoviedb.org/3';
 var _STILL = 'https://image.tmdb.org/t/p/w300';
 var _POSTER = 'https://image.tmdb.org/t/p/w500';
 function _tj(url) {
@@ -331,8 +335,11 @@ function _hubServer(link, label, info) {
       .catch(function () { return null; });
   }
   if (l.indexOf('pixeldra') !== -1 || l.indexOf('pixel') !== -1) {
-    var b = (link.match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
-    var fin = link.indexOf('download') !== -1 ? link : (b + '/api/file/' + link.replace(/\/$/, '').split('/').pop() + '?download');
+    // The button's href is a decoy that's the same on every page — the real
+    // file id is swapped in by the script below it, so prefer that.
+    var real = info.pxl || link;
+    var b = (real.match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
+    var fin = real.indexOf('download') !== -1 ? real : (b + '/api/file/' + real.replace(/\/$/, '').split('/').pop() + '?download');
     return Promise.resolve(_src(fin, q, name));
   }
   if (l.indexOf('fsl') !== -1 || l.indexOf('download') !== -1 || l.indexOf('s3') !== -1 || l.indexOf('10gb') !== -1) {
@@ -359,7 +366,12 @@ function _hubcloud(url) {
       // claiming one. The player hides its quality menu for an unknown stream
       // instead of showing a number that isn't real.
       var quality = _quality(title) || null;
-      var info = { tags: _releaseTags(title), size: size, res: _resLabel(quality), quality: quality };
+      // The site posts sample cuts, trailers and post-credit clips next to the
+      // real release, tagged with the same quality — left in, one of them wins
+      // the "best source" pick and you get seven minutes instead of the film.
+      if (/\bsample\b|post[-. ]?credit|\btrailer\b/i.test(title)) return [];
+      var pxl = (doc.match(/var\s+pxl\s*=\s*["']([^"']+)["']/) || [])[1] || '';
+      var info = { tags: _releaseTags(title), size: size, res: _resLabel(quality), quality: quality, pxl: pxl };
       var jobs = [], m, re = /<a[^>]*href="([^"]+)"[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*>([\s\S]*?)<\/a>|<a[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
       while ((m = re.exec(doc)) !== null) {
         var link = m[1] || m[3]; var text = htmlText(m[2] || m[4] || '').toLowerCase();
