@@ -29,7 +29,7 @@ function _domains() {
 function getInfo() {
   return {
     name: 'VegaMovies', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.3'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.4'
   };
 }
 
@@ -37,6 +37,11 @@ function getInfo() {
 function _trim(s) { return String(s == null ? '' : s).replace(/^\s+|\s+$/g, ''); }
 function _quality(s) { var m = String(s || '').match(/(\d{3,4})[pP]/); return m ? (m[1] + 'p') : null; }
 function _uniq(a) { var s = {}, o = []; for (var i = 0; i < a.length; i++) { if (a[i] && !s[a[i]]) { s[a[i]] = 1; o.push(a[i]); } } return o; }
+// The sandbox has base64ToBytes but no atob.
+function _b64(s) {
+  try { var b = base64ToBytes(String(s || '')); var o = ''; for (var i = 0; i < b.length; i++) o += String.fromCharCode(b[i]); return o; }
+  catch (e) { return ''; }
+}
 // Use the host absUrl — QuickJS has no URL constructor, so `new URL()` throws
 // there and would silently leave relative hrefs (e.g. search.php permalinks)
 // unresolved, breaking detail loads from search.
@@ -48,6 +53,8 @@ function _get(url, ref) {
 function _cleanTitle(raw) {
   var t = htmlText(raw || '').replace(/^\s*download\s+/i, '');
   t = t.split(/\s*\(/)[0].split(/\bseason\b/i)[0].split(/\bS0?\d/)[0];
+  // Cutting at S01 can leave the opening bracket of "{S01E01 Added}" behind.
+  t = _trim(t).replace(/[\s\-–:,\[{]+$/, '');
   return _trim(t) || _trim(htmlText(raw || ''));
 }
 
@@ -62,7 +69,7 @@ function _cards(html, main) {
     var href = m[1], inner = m[2];
     if (!/<img/i.test(inner)) continue;
     var alt = (inner.match(/<img[^>]+alt="([^"]*)"/i) || [])[1] || '';
-    var title = _trim(alt.replace(/^download\s+/i, ''));
+    var title = _trim(htmlText(alt).replace(/^download\s+/i, ''));
     if (!title) continue;
     var url = _abs(href, main);
     if (seen[url] || /\/(category|page|genre|tag|web-series|movies)\/?$/i.test(url)) continue;
@@ -83,10 +90,12 @@ function _cards(html, main) {
 function getHome(opts) {
   var rows = [
     { title: 'Latest', path: '/' },
-    { title: 'Netflix', path: '/category/web-series/netflix/' },
-    { title: 'Amazon Prime', path: '/category/web-series/amazon-prime-video/' },
-    { title: 'Anime Series', path: '/category/anime-series/' },
-    { title: 'Korean Series', path: '/category/korean-series/' }
+    // The /category/ prefix now 301s to the bare path — go straight there so a
+    // row still fills when redirects aren't followed.
+    { title: 'Netflix', path: '/web-series/netflix/' },
+    { title: 'Amazon Prime', path: '/web-series/amazon-prime-video/' },
+    { title: 'Anime Series', path: '/anime-series/' },
+    { title: 'Korean Series', path: '/korean-series/' }
   ];
   return _domains().then(function (main) {
     return Promise.all(rows.map(function (row) {
@@ -200,12 +209,17 @@ function _seriesEpisodes(html, main) {
     var after = html.slice(p.end, p.end + 1500);
     var season = (p.text.match(/(?:Season |S)0?(\d+)/i) || [])[1];
     season = season ? parseInt(season, 10) : 1;
-    var inter = '';
+    // Only the V-Cloud button's page lists one link per episode. G-Direct sits
+    // above it and points at file lockers we can't play, so it's the fallback.
+    var inter = '', alt = '';
     var am, are = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
     while ((am = are.exec(after)) !== null) {
       var t = htmlText(am[2]);
-      if (/V-?Cloud|Episode|Download|G-?Direct/i.test(t)) { inter = am[1]; break; }
+      if (/\bzip\b|batch/i.test(t)) continue;
+      if (/V-?Cloud/i.test(t)) { inter = am[1]; break; }
+      if (!alt && /Episode|Download|G-?Direct/i.test(t)) alt = am[1];
     }
+    if (!inter) inter = alt;
     if (!inter) return Promise.resolve({ season: season, links: [] });
     return _get(_abs(inter, main), main + '/').then(function (doc) {
       var links = [], lm, lre = /<a[^>]+href="([^"]+)"/g;
@@ -273,7 +287,10 @@ function _vcloud(url) {
     if (url.indexOf('/video/') !== -1) {
       link = (html.match(/<div class="vd">[\s\S]*?<a[^>]+href="([^"]+)"/i) || [])[1] || '';
     } else {
-      link = (html.match(/var\s+url\s*=\s*'([^']*)'/) || [])[1] || '';
+      // The landing page hands the tokenised file page over in `var url`, now
+      // wrapped in atob(atob(…)). Plain strings still show up on older pages.
+      var um = html.match(/var\s+url\s*=\s*(atob\(atob\()?\s*'([^']*)'/);
+      link = um ? (um[1] ? _b64(_b64(um[2])) : um[2]) : '';
     }
     if (!link) return [];
     if (!/^https?:/i.test(link)) link = _baseOf(url) + link;
@@ -286,11 +303,15 @@ function _vcloud(url) {
       var quality = _quality(header) || _quality(url) || null;
       var suffix = (header ? (' [' + header.replace(/\s+/g, ' ').slice(0, 60) + ']') : '')
         + (size ? ' [' + size + ']' : '');
+      // The Pixeldrain button ships a dead id in its href and a script swaps in
+      // the live one, so take the script's value when it's there.
+      var pxl = (doc.match(/var\s+pxl\s*=\s*"([^"]+)"/) || [])[1] || '';
       var jobs = [], m;
       var re = /<a[^>]*href="([^"]+)"[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*>([\s\S]*?)<\/a>|<a[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
       while ((m = re.exec(doc)) !== null) {
         var blink = m[1] || m[3]; var text = htmlText(m[2] || m[4] || '').toLowerCase();
         if (!blink) continue;
+        if (pxl && /pixeldrain/i.test(blink)) blink = pxl;
         jobs.push(_server(blink, text, quality, suffix));
       }
       return Promise.all(jobs).then(function (lists) {
@@ -303,7 +324,9 @@ function _vcloud(url) {
 
 function _server(link, label, quality, suffix) {
   // Skip file-locker / folder hosts that aren't a direct, playable stream.
-  if (/gofile\.io|megaup\.net|vikingfile|filebee|filepress|gdflix|gdtot/i.test(link)) {
+  // gpdl/gamerxyt is the 10Gbps button — it lands on a link-generator page,
+  // so the player would be handed HTML instead of the file.
+  if (/gofile\.io|megaup\.net|vikingfile|filebee|filepress|gdflix|gdtot|gpdl\d*\.|gamerxyt/i.test(link)) {
     return Promise.resolve(null);
   }
   var name = 'VegaMovies [' + _serverName(label) + ']' + suffix;
