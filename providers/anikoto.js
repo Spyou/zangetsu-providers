@@ -11,6 +11,12 @@
 //   /ajax/server?get=<link_id>  -> { url: <player embed>, skip_data }
 //   <embed host>/stream/getSources?id=<embed data-id> -> m3u8 + subs
 //
+// Some episodes only list servers that no longer hand back a plain file. For
+// those the site's own player asks a mapper API for EXTRA servers, keyed by the
+// <mal>/<episode>/<timestamp> the episode anchors already carry, so we carry
+// those three through the episode url and ask the same API when the episode's
+// own servers all come up empty.
+//
 // Home = /home spotlight (hero) + recent from the JSON API (anikotoapi.site);
 // slugs are shared with the site, so those cards resolve through getDetail.
 
@@ -24,10 +30,12 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 // Hosts whose /stream/getSources returns a plain m3u8. VidPlay (vidtube) is the
 // one still doing so; MegaPlay/VidWish are kept as fallbacks.
 var PLAYER_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:vidtube\.[a-z]+|megaplay\.[a-z]+|vidwish\.[a-z]+)/i;
+// Extra servers the episode's own list doesn't offer, keyed <mal>/<ep>/<ts>.
+var MAPPER = 'https://mapper.nekostream.site/api/mal/';
 
 function getInfo() {
   return { name: 'AniKoto', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.4' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.5' };
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -182,12 +190,16 @@ function _genres(html) {
   return g;
 }
 
-// Episode url: anikoto://<cat>/<encoded server_ids>/<sub><dub>/<num>. The player
-// rewrites the leading <cat> segment for its Sub/Dub toggle; getVideoSources
-// resolves the server list from the (per-episode) server_ids blob.
-function _epUrl(cat, serverIds, sub, dub, num) {
+// Episode url: anikoto://<cat>/<encoded server_ids>/<sub><dub>/<num>, then the
+// mapper token <mal>/<ep>/<timestamp> when the episode list carries it. The
+// player rewrites the leading <cat> segment for its Sub/Dub toggle;
+// getVideoSources resolves the server list from the (per-episode) server_ids
+// blob. The token is appended, never inserted, so urls saved before it existed
+// (history, downloads) still resolve — they just skip the mapper fallback.
+function _epUrl(cat, serverIds, sub, dub, num, token) {
   return 'anikoto://' + cat + '/' + encodeURIComponent(serverIds) + '/'
-    + (sub ? 1 : 0) + (dub ? 1 : 0) + '/' + num;
+    + (sub ? 1 : 0) + (dub ? 1 : 0) + '/' + num
+    + (token ? '/' + token : '');
 }
 
 function getDetail(url, opts) {
@@ -220,14 +232,22 @@ function getDetail(url, opts) {
         var sub = (attrs.match(/data-sub="(\d+)"/) || [])[1] === '1';
         var dub = (attrs.match(/data-dub="(\d+)"/) || [])[1] === '1';
         if (!sub && !dub) continue;
-        if (!mal) mal = (attrs.match(/data-mal="(\d+)"/) || [])[1] || null;
+        // The mapper is keyed per episode, so slug/timestamp come off THIS
+        // anchor; data-slug is the episode number the API wants, not the show
+        // slug. All three or none — a partial token is a 404.
+        var epMal = (attrs.match(/data-mal="(\d+)"/) || [])[1];
+        var epSlug = (attrs.match(/data-slug="([^"]+)"/) || [])[1];
+        var epTs = (attrs.match(/data-timestamp="(\d+)"/) || [])[1];
+        var token = (epMal && epSlug && epTs)
+          ? (epMal + '/' + encodeURIComponent(epSlug) + '/' + epTs) : null;
+        if (!mal) mal = epMal || null;
         if (sub) subN++;
         if (dub) dubN++;
         var initCat = (cat === 'dub' && dub) || (cat === 'sub' && !sub && dub) ? 'dub' : 'sub';
         var title2 = (attrs.match(/title="([^"]+)"/) || [])[1];
         out.push({ id: cat + ':' + num, number: num,
           title: title2 ? htmlText(title2).trim() : ('Episode ' + num),
-          url: _epUrl(initCat, serverIds, sub, dub, num) });
+          url: _epUrl(initCat, serverIds, sub, dub, num, token) });
       }
       base.episodes = out;
       base.subCount = subN;
@@ -268,6 +288,10 @@ function getVideoSources(episodeUrl) {
   var parts = raw.split('/');
   var cat = (parts[0] === 'dub') ? 'dub' : 'sub';
   var serverIds = parts[1] ? decodeURIComponent(parts[1]) : '';
+  // <mal>/<ep>/<timestamp>, already url-safe from _epUrl. Absent on urls saved
+  // before the token existed, which just means no mapper fallback for them.
+  var token = (parts[4] && parts[5] && parts[6])
+    ? (parts[4] + '/' + parts[5] + '/' + parts[6]) : null;
   if (!serverIds) return Promise.reject(new Error('AniKoto: no server ids'));
 
   return _ajax('/ajax/server/list?servers=' + encodeURIComponent(serverIds)).then(function (j) {
@@ -282,7 +306,40 @@ function getVideoSources(episodeUrl) {
     if (!want.length) want = servers;
     want.sort(function (a, b) { return _srvRank(a.name) - _srvRank(b.name); });
     return _tryServers(want, 0, cat);
+  }).catch(function (err) {
+    // Only once the episode's own servers are exhausted — VidPlay is a direct
+    // m3u8 and one request cheaper, so it stays first.
+    return _mapperServers(token, cat, err);
   });
+}
+
+// Extra servers for episodes whose own list is all dead hosts. The site's
+// player asks the same API and appends whatever it returns as ordinary servers,
+// so an entry's `url` is just another link id for the /ajax/server?get= route
+// above — it drops straight back into _tryServers.
+//
+// Only the `url` entries are used. An entry can also carry a `download` map of
+// quality -> redirector link, but those all end up on kwik, and kwik blocks
+// every HTTP/1.1 request outright (Cloudflare 1020, cookies and User-Agent make
+// no difference — same request over HTTP/2 gets a 200). The host's fetch is
+// dart:io, which only speaks HTTP/1.1, so following those links would just be
+// three more round-trips to a guaranteed 403. Worth revisiting if fetch ever
+// rides a client that negotiates HTTP/2.
+function _mapperServers(token, cat, err) {
+  if (!token) throw err;
+  return _json(MAPPER + token, SITE + '/').then(function (j) {
+    var extra = [];
+    for (var name in j) {
+      var e = j[name];
+      if (name === 'status' || !e || typeof e !== 'object') continue;
+      var bucket = e[cat];
+      if (bucket && bucket.url) {
+        extra.push({ type: cat, linkId: String(bucket.url), name: name });
+      }
+    }
+    if (!extra.length) throw err;
+    return _tryServers(extra, 0, cat);
+  }).catch(function () { throw err; }); // keep the original "no playable server"
 }
 
 // Resolve servers in preference order; take the first that yields a known embed
