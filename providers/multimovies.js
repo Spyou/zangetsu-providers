@@ -11,7 +11,9 @@
 var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'multimovies';
 
-var DEFAULT_MAIN = 'https://multimovies.homes';
+// Fallback for when the domain list above can't be reached — .homes went dark,
+// so this has to track whatever the list is currently pointing at.
+var DEFAULT_MAIN = 'https://multimovies.beer';
 var URLS = 'https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json';
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/120.0 Safari/537.36';
@@ -33,7 +35,10 @@ function _main() {
 function getInfo() {
   return {
     name: 'MultiMovies', lang: 'hi', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.2'
+    // no /favicon.ico on this install, the theme icon is the only one served
+    logo: DEFAULT_MAIN + '/wp-content/uploads/2024/01/'
+      + 'cropped-CompressJPEG.online_512x512_image-192x192.png',
+    type: 'movie', version: '1.0.3'
   };
 }
 
@@ -203,29 +208,34 @@ function getDetail(url, opts) {
   });
 }
 
-// Pull the imdb/tmdb id out of the first player option's embed URL. Movies are
-// keyed by imdb (tt…), series by tmdb (the GDMIRROR embed is /embed/tv/{tmdb}/…)
-// — other embeds (Cineverse/Peachify/…) also carry tt/tmdb ids, so option 1 is
-// enough and we don't need to single out GDMIRROR here.
+// Pull the imdb/tmdb id out of a player option's embed URL. Movies are keyed by
+// imdb (tt…), series by tmdb (the GDMIRROR embed is /embed/tv/{tmdb}/…). Most of
+// the other embeds carry a tt/tmdb id too, so we take whichever answers first
+// rather than singling out GDMIRROR.
 function _syncIds(playerHtml, isSeries, main) {
-  var opts = _playerOptions(playerHtml || '');
-  if (!opts.length) return Promise.resolve({});
-  return _dooAjax(main, opts[0]).then(function (embed) {
-    if (!embed) return {};
-    var imdb = (embed.match(/(tt\d{6,})/) || [])[1] || null;
-    var tmdb = (embed.match(/\/(?:tv|movie)\/(\d+)/) ||
-      embed.match(/[?&](?:id|tmdb|tmdbid)=(\d+)/i) || [])[1] || null;
-    var res = {};
-    if (isSeries) {
-      res.tmdbIsTv = true;
-      if (tmdb) res.tmdbId = parseInt(tmdb, 10);
-      else if (imdb) res.imdbId = imdb;
-    } else {
-      if (imdb) res.imdbId = imdb;
-      else if (tmdb) res.tmdbId = parseInt(tmdb, 10);
-    }
-    return res;
-  }).catch(function () { return {}; });
+  // Not every option carries an id — series option 1 is usually a file locker
+  // with an opaque slug — so keep asking until one does.
+  var list = _playerOptions(playerHtml || '').slice(0, 6), i = 0;
+  function next() {
+    if (i >= list.length) return Promise.resolve({});
+    return _dooAjax(main, list[i++]).then(function (embed) {
+      var imdb = (embed.match(/(tt\d{6,})/) || [])[1] || null;
+      var tmdb = (embed.match(/\/(?:tv|movie)\/(\d+)/) ||
+        embed.match(/[?&](?:id|tmdb|tmdbid)=(\d+)/i) || [])[1] || null;
+      if (!imdb && !tmdb) return next();
+      var res = {};
+      if (isSeries) {
+        res.tmdbIsTv = true;
+        if (tmdb) res.tmdbId = parseInt(tmdb, 10);
+        else res.imdbId = imdb;
+      } else {
+        if (imdb) res.imdbId = imdb;
+        else res.tmdbId = parseInt(tmdb, 10);
+      }
+      return res;
+    });
+  }
+  return next().catch(function () { return {}; });
 }
 
 function getEpisodes(url, opts) {
@@ -241,7 +251,11 @@ function _playerOptions(html) {
     var post = (tag.match(/data-post=['"](\d+)/) || [])[1];
     var nume = (tag.match(/data-nume=['"]([^'"]+)/) || [])[1];
     var type = (tag.match(/data-type=['"]([^'"]+)/) || [])[1];
-    if (post && nume && type) out.push({ post: post, nume: nume, type: type });
+    // the trailer option is a YouTube embed — no stream, no id, and it's first
+    // in the list, so leave it out rather than burning a lookup on it
+    if (post && nume && type && nume !== 'trailer') {
+      out.push({ post: post, nume: nume, type: type });
+    }
   }
   return out;
 }

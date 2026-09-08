@@ -32,7 +32,7 @@
     {
       "id": "uhdmovies",
       "name": "UHD Movies",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "type": "movie",
       "lang": "en",
       "file": "providers/uhdmovies.js",
@@ -68,7 +68,7 @@
     {
       "id": "multimovies",
       "name": "MultiMovies",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "type": "movie",
       "lang": "hi",
       "file": "providers/multimovies.js",

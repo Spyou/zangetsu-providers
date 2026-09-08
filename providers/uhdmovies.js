@@ -13,7 +13,9 @@ var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'uhdmovies';
 
 var URLS = 'https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json';
-var DEFAULT_MAIN = 'https://uhdmovies.food';
+// Fallback for when the domain list can't be reached — .food went dark, so
+// this has to track wherever the list currently points.
+var DEFAULT_MAIN = 'https://uhdmovies.autos';
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
@@ -33,7 +35,7 @@ function _domains() {
 function getInfo() {
   return {
     name: 'UHD Movies', lang: 'en', baseUrl: DEFAULT_MAIN,
-    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.2'
+    logo: DEFAULT_MAIN + '/favicon.ico', type: 'movie', version: '1.0.3'
   };
 }
 
@@ -107,9 +109,10 @@ function _epHrefs(url) {
   catch (e) { return []; }
 }
 
-// ── TMDB enrichment (keyless proxy) — UHDMovies posts only expose release
-// filenames, so plot/genres/poster + episode names/stills come from TMDB. ──
-var _TMDB = 'https://jumpfreedom.com/3';
+// ── TMDB enrichment — posts only expose release filenames, so plot/genres/
+// poster + episode names/stills come from TMDB. The host attaches the api_key
+// to every api.themoviedb.org request, so none is passed here. ──
+var _TMDB = 'https://api.themoviedb.org/3';
 var _STILL = 'https://image.tmdb.org/t/p/w300';
 var _POSTER = 'https://image.tmdb.org/t/p/w500';
 
