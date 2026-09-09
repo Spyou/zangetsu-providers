@@ -14,7 +14,7 @@
     {
       "id": "anikoto",
       "name": "AniKoto",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "type": "anime",
       "lang": "en",
       "file": "providers/anikoto.js",
@@ -50,7 +50,7 @@
     {
       "id": "hianime",
       "name": "HiAnime",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "type": "anime",
       "lang": "en",
       "file": "providers/hianime.js",
