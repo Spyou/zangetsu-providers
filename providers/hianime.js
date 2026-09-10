@@ -8,16 +8,13 @@
 //   /<slug>                                    -> poster, synopsis, sub/dub ticks
 //   /api/theme/episode/list/<animeId>          -> { html } of ep-item anchors
 //   /api/theme/episode/servers?episodeId=<id>  -> { html }, data-hash = b64 embed
-//   <embed>/stream/getSources?id=&type=        -> m3u8 + subtitle tracks
+//   <embed>/stream/getSources(New)?id=&type=   -> m3u8 + subtitle tracks
 //
 // The anime id is just the trailing number of the slug (dan-da-dan-86 -> 86).
 //
-// Of the servers the site offers, only VidPlay (vidtube) still answers with a
-// plain file: megaplay's getSources returns an encrypted blob instead of
-// `sources`, and Zoko hides its payload behind its own player. Both are left in
-// the fallback order in case megaplay ever reverts, but a title carrying
-// neither VidPlay cut (One Piece, Naruto) fails with "no playable server"
-// rather than pretending to have a stream.
+// VidPlay (vidtube) uses getSources. MegaPlay's getSources returns an encrypted
+// `enc` blob — getSourcesNew restores the plain `sources.file`. Zoko still hides
+// its payload behind its own player and stays out of PLAYER_RE.
 
 var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'hianime';
@@ -26,13 +23,20 @@ var SITE = 'https://hianime.at';
 var API = SITE + '/api/theme/';
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
-// Embed hosts whose /stream/getSources hands back a plain m3u8. vidtube is the
-// only one still doing it; megaplay stays for the day it starts again.
+// Embed hosts that hand back a plain m3u8 (via getSources or getSourcesNew).
 var PLAYER_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:vidtube\.[a-z]+|megaplay\.[a-z]+)/i;
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.1.0' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.1.1' };
+}
+
+// MegaPlay encrypts /stream/getSources; /stream/getSourcesNew still returns
+// sources.file. VidPlay (vidtube) only exposes getSources.
+function _sourcesUrl(base, dataId, type) {
+  var path = /megaplay\.[a-z]+/i.test(String(base || ''))
+    ? '/stream/getSourcesNew' : '/stream/getSources';
+  return base + path + '?id=' + dataId + '&type=' + type;
 }
 
 function _mode(opts) { return (opts && opts.category === 'dub') ? 'dub' : 'sub'; }
@@ -331,7 +335,7 @@ function _tryServers(list, i, cat) {
   });
 }
 
-// The cut (sub/hsub/dub) the embed url was issued for. getSources is keyed by
+// The cut (sub/hsub/dub) the embed url was issued for. Sources are keyed by
 // the embed's data-id, and that id is SHARED across the three cuts — the audio
 // comes from `type` alone — so a dub embed asked without it answers with the
 // sub stream.
@@ -345,13 +349,12 @@ function _extractPlayer(embed, cat) {
   return _get(embed, SITE + '/').then(function (mhtml) {
     var dataId = (mhtml.match(/data-id="(\d+)"/) || [])[1];
     if (!dataId) throw new Error('HiAnime: no embed id');
-    return fetch(base + '/stream/getSources?id=' + dataId + '&type=' + type, {
+    return fetch(_sourcesUrl(base, dataId, type), {
       headers: { 'User-Agent': UA, 'Referer': embed, 'X-Requested-With': 'XMLHttpRequest' }
     }).then(function (r) {
       var j; try { j = JSON.parse(r.body || 'null'); } catch (e) { throw new Error('HiAnime: bad getSources'); }
       var s = j && j.sources;
-      // megaplay answers with an encrypted blob and no `sources` — that throw is
-      // what walks us on to the next server.
+      // No sources.file → walk on to the next server.
       var file = s ? (s.file || (s[0] && s[0].file)) : null;
       if (!file) throw new Error('HiAnime: no stream file');
       var subs = [], tracks = (j && j.tracks) || [];
