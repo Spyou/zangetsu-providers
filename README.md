@@ -23,7 +23,6 @@ One manifest = many sources. This default repo is added on first launch, so user
 
 | Source | Type | Notes |
 | --- | --- | --- |
-| AllAnime | Anime | Large catalog, sub and dub. |
 | HiAnime | Anime | Sub and dub, multiple subtitle languages. |
 | 4K HDHub | Movie / Series | Movies and series up to 2160p / HDR. |
 | UHD Movies | Movie / Series | Movies and series, high-bitrate releases. |
@@ -45,12 +44,12 @@ Availability depends on each site staying up; sources are updated as sites chang
   "description": "Streaming sources for the Zangetsu app.",
   "sources": [
     {
-      "id": "allanime",
-      "name": "AllAnime",
+      "id": "hianime",
+      "name": "HiAnime",
       "version": "1.0.0",
       "type": "anime",
       "lang": "en",
-      "file": "providers/allanime.js",
+      "file": "providers/hianime.js",
       "nsfw": false
     }
   ]

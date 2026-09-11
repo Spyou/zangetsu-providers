@@ -3,15 +3,6 @@
   "description": "Streaming sources for the Zangetsu app. Maintained by Spyou.",
   "sources": [
     {
-      "id": "allanime",
-      "name": "AllAnime",
-      "version": "1.0.4",
-      "type": "anime",
-      "lang": "en",
-      "file": "providers/allanime.js",
-      "nsfw": false
-    },
-    {
       "id": "anikoto",
       "name": "AniKoto",
       "version": "1.0.6",
@@ -72,15 +63,6 @@
       "type": "movie",
       "lang": "hi",
       "file": "providers/multimovies.js",
-      "nsfw": false
-    },
-    {
-      "id": "animekai",
-      "name": "AnimeKai",
-      "version": "1.1.2",
-      "type": "anime",
-      "lang": "en",
-      "file": "providers/animekai.js",
       "nsfw": false
     },
     {
