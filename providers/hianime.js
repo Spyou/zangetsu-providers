@@ -12,9 +12,14 @@
 //
 // The anime id is just the trailing number of the slug (dan-da-dan-86 -> 86).
 //
-// VidPlay (vidtube) uses getSources. MegaPlay's getSources returns an encrypted
-// `enc` blob — getSourcesNew restores the plain `sources.file`. Zoko still hides
-// its payload behind its own player and stays out of PLAYER_RE.
+// VidPlay (vidtube) uses getSources. MegaPlay now encrypts BOTH getSources and
+// getSourcesNew into an `enc` blob, so it hands us nothing playable any more.
+// Zoko has no sources endpoint at all — the embed page carries the whole player
+// config in one obfuscated blob, which is a request cheaper than either.
+//
+// That mix matters: roughly a quarter of episodes list no VidPlay server (ep1 of
+// One Piece and Naruto among them). Those used to fail outright with every other
+// server either encrypted or unsupported. Zoko is on all of them.
 
 var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'hianime';
@@ -25,14 +30,19 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 // Embed hosts that hand back a plain m3u8 (via getSources or getSourcesNew).
 var PLAYER_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:vidtube\.[a-z]+|megaplay\.[a-z]+)/i;
+// Zoko is extracted differently — see _extractZoko.
+var ZOKO_RE = /^https?:\/\/(?:[a-z0-9-]+\.)?zokoanime\.[a-z]+/i;
+// Fixed XOR key from the player's own core/obfuscate.js.
+var ZOKO_KEY = 'otaku-embed-v1';
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.1.1' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.2.0' };
 }
 
-// MegaPlay encrypts /stream/getSources; /stream/getSourcesNew still returns
-// sources.file. VidPlay (vidtube) only exposes getSources.
+// VidPlay (vidtube) only exposes getSources. MegaPlay's getSourcesNew used to
+// return a plain sources.file and no longer does — kept pointing at it anyway,
+// since it's the endpoint that would come back first if they ever relent.
 function _sourcesUrl(base, dataId, type) {
   var path = /megaplay\.[a-z]+/i.test(String(base || ''))
     ? '/stream/getSourcesNew' : '/stream/getSources';
@@ -294,11 +304,16 @@ function _parseServers(html) {
   }
   return out;
 }
+// VidPlay first (one request cheaper than Zoko, and a stable CDN), Zoko next.
+// The MegaPlay-backed names trail them: they answer, but only with `enc`, so
+// they cost two requests to learn nothing. Left in rather than dropped — if
+// MegaPlay ever serves a plain file again this ordering still works.
 function _srvRank(name) {
   var n = String(name || '').toLowerCase();
   if (n.indexOf('vidplay') > -1) return 0;
-  if (n.indexOf('vidstream') > -1) return 1;
-  if (n.indexOf('hd') > -1) return 2;
+  if (n.indexOf('zoko') > -1) return 1;
+  if (n.indexOf('vidstream') > -1) return 2;
+  if (n.indexOf('hd') > -1) return 3;
   return 5;
 }
 
@@ -329,9 +344,63 @@ function getVideoSources(episodeUrl) {
 
 function _tryServers(list, i, cat) {
   if (i >= list.length) return Promise.reject(new Error('HiAnime: no playable server'));
-  if (!PLAYER_RE.test(list[i].url)) return _tryServers(list, i + 1, cat);
-  return _extractPlayer(list[i].url, cat).catch(function () {
-    return _tryServers(list, i + 1, cat);
+  var url = list[i].url;
+  var next = function () { return _tryServers(list, i + 1, cat); };
+  if (ZOKO_RE.test(url)) return _extractZoko(url, cat).catch(next);
+  if (!PLAYER_RE.test(url)) return next();
+  return _extractPlayer(url, cat).catch(next);
+}
+
+// Zoko ships the player config as base64 of the JSON XOR'd with a fixed key
+// (its own core/obfuscate.js does exactly this, in reverse). One GET, no
+// sources endpoint, no decryption key to chase.
+function _zokoConfig(html) {
+  var blob = (String(html || '').match(/window\.__P\s*=\s*"([^"]+)"/) || [])[1];
+  if (!blob) return null;
+  var bytes = base64ToBytes(blob), out = [];
+  for (var i = 0; i < bytes.length; i++) {
+    out.push(bytes[i] ^ ZOKO_KEY.charCodeAt(i % ZOKO_KEY.length));
+  }
+  try { return JSON.parse(_utf8(out)); } catch (e) { return null; }
+}
+
+// The blob is UTF-8, and subtitle labels are the part that isn't ASCII. Decoded
+// by hand rather than through escape/unescape, which are Annex B and not worth
+// betting a source on.
+function _utf8(b) {
+  var s = '', i = 0;
+  while (i < b.length) {
+    var c = b[i++];
+    if (c < 0x80) { s += String.fromCharCode(c); continue; }
+    if (c < 0xE0) { s += String.fromCharCode(((c & 0x1F) << 6) | (b[i++] & 0x3F)); continue; }
+    if (c < 0xF0) {
+      s += String.fromCharCode(((c & 0x0F) << 12) | ((b[i++] & 0x3F) << 6) | (b[i++] & 0x3F));
+      continue;
+    }
+    var cp = (((c & 0x07) << 18) | ((b[i++] & 0x3F) << 12)
+      | ((b[i++] & 0x3F) << 6) | (b[i++] & 0x3F)) - 0x10000;
+    s += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF));
+  }
+  return s;
+}
+
+function _extractZoko(embed, cat) {
+  var base = (embed.match(/^(https?:\/\/[^/]+)/) || [])[1] || 'https://zokoanime.video';
+  return _get(embed, SITE + '/').then(function (html) {
+    var cfg = _zokoConfig(html);
+    var file = cfg && cfg.src;
+    if (!file) throw new Error('HiAnime: no Zoko stream');
+    var subs = [], tracks = cfg.subtitles || [];
+    for (var i = 0; i < tracks.length; i++) {
+      var t = tracks[i];
+      if (!t || !t.src) continue;
+      subs.push({ url: t.src, lang: t.lang || 'Sub', label: t.label || t.lang || 'Sub',
+        format: /\.srt(\?|$)/i.test(t.src) ? 'srt' : 'vtt', 'default': !!t['default'] });
+    }
+    // The CDN hands these out per embed fetch and stops answering a while after,
+    // so they are resolved at play time and never cached.
+    return _streams(file, { 'User-Agent': UA, 'Referer': base + '/', 'Origin': base },
+      cat, subs);
   });
 }
 
@@ -365,28 +434,34 @@ function _extractPlayer(embed, cat) {
         subs.push({ url: t.file, lang: t.label || 'Sub', label: t.label || 'Sub',
           format: /\.srt(\?|$)/i.test(t.file) ? 'srt' : 'vtt', 'default': !!t['default'] });
       }
-      var hdrs = { 'User-Agent': UA, 'Referer': base + '/', 'Origin': base };
-      var mk = function (u, q) {
-        return { url: u, quality: q, container: /\.m3u8(\?|$)/i.test(u) ? 'hls' : 'mp4',
-          headers: hdrs, kind: cat, audioLang: cat === 'dub' ? 'en' : 'ja', subtitles: subs };
-      };
-      if (!/\.m3u8(\?|$)/i.test(file)) return [mk(file, 'auto')];
-      // Adaptive master → expose each rendition so the player gets a real
-      // quality menu, with "auto" left first for adaptive switching.
-      return fetch(file, { headers: { 'User-Agent': UA, 'Referer': base + '/' } }).then(function (mr) {
-        var body = mr.body || '';
-        var dir = file.replace(/[^/]*(\?.*)?$/, '');
-        var vs = [], m, re = /#EXT-X-STREAM-INF:[^\n]*?RESOLUTION=\d+x(\d+)[^\n]*\r?\n([^\r\n#]+)/gi;
-        while ((m = re.exec(body)) !== null) {
-          var uri = String(m[2]).replace(/^\s+|\s+$/g, '');
-          if (!uri) continue;
-          vs.push({ h: parseInt(m[1], 10), url: /^https?:/i.test(uri) ? uri : (dir + uri) });
-        }
-        vs.sort(function (a, b) { return b.h - a.h; });
-        var out = [mk(file, 'auto')];
-        for (var k = 0; k < vs.length; k++) out.push(mk(vs[k].url, vs[k].h + 'p'));
-        return out;
-      }).catch(function () { return [mk(file, 'auto')]; });
+      return _streams(file, { 'User-Agent': UA, 'Referer': base + '/', 'Origin': base },
+        cat, subs);
     });
   });
+}
+
+// Shared by both extractors: wrap [file] as a stream list, and when it's an
+// adaptive master, expose each rendition too so the player gets a real quality
+// menu. "auto" stays first so adaptive switching is still the default.
+function _streams(file, hdrs, cat, subs) {
+  var mk = function (u, q) {
+    return { url: u, quality: q, container: /\.m3u8(\?|$)/i.test(u) ? 'hls' : 'mp4',
+      headers: hdrs, kind: cat, audioLang: cat === 'dub' ? 'en' : 'ja', subtitles: subs };
+  };
+  if (!/\.m3u8(\?|$)/i.test(file)) return Promise.resolve([mk(file, 'auto')]);
+  return fetch(file, { headers: { 'User-Agent': hdrs['User-Agent'], 'Referer': hdrs.Referer } })
+    .then(function (mr) {
+      var body = mr.body || '';
+      var dir = file.replace(/[^/]*(\?.*)?$/, '');
+      var vs = [], m, re = /#EXT-X-STREAM-INF:[^\n]*?RESOLUTION=\d+x(\d+)[^\n]*\r?\n([^\r\n#]+)/gi;
+      while ((m = re.exec(body)) !== null) {
+        var uri = String(m[2]).replace(/^\s+|\s+$/g, '');
+        if (!uri) continue;
+        vs.push({ h: parseInt(m[1], 10), url: /^https?:/i.test(uri) ? uri : (dir + uri) });
+      }
+      vs.sort(function (a, b) { return b.h - a.h; });
+      var out = [mk(file, 'auto')];
+      for (var k = 0; k < vs.length; k++) out.push(mk(vs[k].url, vs[k].h + 'p'));
+      return out;
+    }).catch(function () { return [mk(file, 'auto')]; });
 }
