@@ -37,7 +37,7 @@ var ZOKO_KEY = 'otaku-embed-v1';
 
 function getInfo() {
   return { name: 'HiAnime', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.2.0' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.2.2' };
 }
 
 // VidPlay (vidtube) only exposes getSources. MegaPlay's getSourcesNew used to
@@ -191,10 +191,13 @@ function _epUrl(cat, epId, num) { return 'hianime://' + cat + '/' + epId + '/' +
 
 // Episode thumbnails (Kitsu, keyed by MAL id). The site exposes no per-episode
 // image, so without this the app falls back to the series poster. Kitsu covers
-// older anime too and is reachable where TMDB is ISP-blocked. Strictly
-// best-effort: any failure leaves the poster fallback and never touches
-// playback. Returns { episodeNumber: thumbnailUrl }.
-function _kitsuStills(malId) {
+// older anime too and is reachable where TMDB is ISP-blocked. Best-effort: any
+// failure just leaves the poster fallback.
+//
+// It does NOT get to be slow, though. getEpisodes() runs on the playback path,
+// so time spent here comes out of the app's per-source budget — see below.
+// Returns { episodeNumber: thumbnailUrl }.
+function _kitsuStills(malId, epCount) {
   if (!malId) return Promise.resolve({});
   var H = { 'Accept': 'application/vnd.api+json', 'User-Agent': UA };
   var mapUrl = 'https://kitsu.io/api/edge/mappings?filter%5BexternalSite%5D=myanimelist/anime'
@@ -207,24 +210,46 @@ function _kitsuStills(malId) {
       if (inc[i] && inc[i].type === 'anime') { kid = inc[i].id; break; }
     }
     if (!kid) return {};
+    // Pages are independent and the site already told us how many episodes
+    // there are, so ask for them at once instead of walking them.
+    //
+    // Walking cost nine round trips back to back — about five seconds on One
+    // Piece. getEpisodes() is on the playback path, so that alone spent most
+    // of the app's per-source budget before a stream was ever requested: the
+    // source got dropped as too slow and then benched for ten minutes, which
+    // looks exactly like a dead source. These are episode thumbnails.
+    var pages = Math.min(9, Math.max(1, Math.ceil((epCount || 20) / 20)));
     var map = {};
-    function page(off, depth) {
-      if (depth > 8) return map;
-      var u = 'https://kitsu.io/api/edge/anime/' + kid +
-        '/episodes?page%5Blimit%5D=20&page%5Boffset%5D=' + off;
-      return fetch(u, { headers: H, timeoutMs: 8000 }).then(function (r2) {
-        var d; try { d = JSON.parse(r2.body || 'null'); } catch (e) { return map; }
-        var eps = (d && d.data) || [];
-        for (var k = 0; k < eps.length; k++) {
-          var at = eps[k].attributes || {};
-          var th = at.thumbnail && at.thumbnail.original;
-          if (at.number != null && th) map[at.number] = th;
-        }
-        if (eps.length < 20) return map;
-        return page(off + 20, depth + 1);
-      }).catch(function () { return map; });
+    function take(res) {
+      var eps = (res && res.data) || [];
+      for (var k = 0; k < eps.length; k++) {
+        var at = eps[k].attributes || {};
+        var th = at.thumbnail && at.thumbnail.original;
+        if (at.number != null && th) map[at.number] = th;
+      }
     }
-    return page(0, 0);
+    function fetchPage(i) {
+      return fetch('https://kitsu.io/api/edge/anime/' + kid +
+        '/episodes?page%5Blimit%5D=20&page%5Boffset%5D=' + (i * 20),
+        { headers: H, timeoutMs: 8000 })
+        .then(function (r2) {
+          try { return JSON.parse(r2.body || 'null'); } catch (e) { return null; }
+        })
+        .catch(function () { return null; });
+    }
+    // Three at a time. All nine at once is quicker still, but Kitsu rate-limits
+    // the burst and silently drops a third of the thumbnails; three keeps every
+    // page and is already a fraction of a second.
+    function wave(start) {
+      if (start >= pages) return Promise.resolve(map);
+      var batch = [];
+      for (var i = start; i < Math.min(start + 3, pages); i++) batch.push(fetchPage(i));
+      return Promise.all(batch).then(function (res) {
+        for (var j = 0; j < res.length; j++) take(res[j]);
+        return wave(start + 3);
+      });
+    }
+    return wave(0).catch(function () { return map; });
   }).catch(function () { return {}; });
 }
 
@@ -243,7 +268,31 @@ function _malFromServers(epId, ref) {
   }).catch(function () { return null; });
 }
 
+// Opening a show and then pressing play asks for the same detail twice: once
+// to draw the episode list, once inside getEpisodes() on the playback path.
+// The second pass refetched everything — the watch page, the episode list
+// (~1MB on a long-running show) and the whole Kitsu pass — which on a TV box
+// was enough on its own to blow the app's per-source budget and get the source
+// benched as dead. Five minutes is far shorter than the gap between episodes.
+var _detailCache = {};
+var _DETAIL_TTL = 300000;
+
 function getDetail(url, opts) {
+  var key = String(url) + '|' + _mode(opts);
+  var hit = _detailCache[key];
+  var now = Date.now();
+  if (hit && (now - hit.at) < _DETAIL_TTL) return Promise.resolve(hit.value);
+  return _fetchDetail(url, opts).then(function (d) {
+    // Only a detail that actually carries episodes is worth keeping — caching
+    // a failed parse would pin the failure for the whole window.
+    if (d && d.episodes && d.episodes.length) {
+      _detailCache[key] = { at: Date.now(), value: d };
+    }
+    return d;
+  });
+}
+
+function _fetchDetail(url, opts) {
   var slug = String(url);
   var cat = _mode(opts);
   var watchRef = SITE + '/watch/' + slug;
@@ -280,7 +329,7 @@ function getDetail(url, opts) {
       if (!out.length) return base;
       return _malFromServers(first, watchRef).then(function (mal) {
         base.malId = mal;
-        return _kitsuStills(mal).then(function (stills) {
+        return _kitsuStills(mal, out.length).then(function (stills) {
           for (var k = 0; k < out.length; k++) {
             var still = stills && stills[out[k].number];
             if (still) out[k].thumbnail = still;

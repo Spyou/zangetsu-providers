@@ -41,7 +41,7 @@
     {
       "id": "hianime",
       "name": "HiAnime",
-      "version": "1.2.0",
+      "version": "1.2.2",
       "type": "anime",
       "lang": "en",
       "file": "providers/hianime.js",
