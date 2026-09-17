@@ -6,7 +6,7 @@
 // through the TorBox API with the user's API key. Multi-file packs select
 // the episode by filename (Torrentio fileIdx does NOT match TorBox file ids).
 //
-// Settings: apiKey, cachedOnly, Torrentio sort/limit, resolve caps (see getSettings).
+// Settings: apiKey, webStreaming (HLS), cachedOnly, Torrentio sort/limit, resolve caps.
 
 var SOURCE_ID = (typeof __SOURCE_ID !== 'undefined' && __SOURCE_ID)
   ? String(__SOURCE_ID) : 'torbox';
@@ -26,13 +26,19 @@ var _ZIP_ONLY = /\.zip$/i;
 function getInfo() {
   return {
     name: 'TorBox', lang: 'en', baseUrl: 'https://torbox.app',
-    logo: 'https://torbox.app/favicon.ico', type: 'movie', version: '1.0.8'
+    logo: 'https://torbox.app/favicon.ico', type: 'movie', version: '1.0.0'
   };
 }
 
 function getSettings() {
   return [
     { key: 'apiKey', label: 'TorBox API key', type: 'text', default: '' },
+    {
+      key: 'webStreaming',
+      label: 'Web streaming (HLS)',
+      type: 'bool',
+      default: false
+    },
     { key: 'cachedOnly', label: 'Cached torrents only', type: 'bool', default: true },
     {
       key: 'torrentioBase',
@@ -81,20 +87,6 @@ function getSettings() {
       ]
     },
     {
-      key: 'maxPlayableSources',
-      label: 'Max playable streams to unlock',
-      type: 'enum',
-      default: '6',
-      options: [
-        { value: '2', label: '2' },
-        { value: '3', label: '3' },
-        { value: '4', label: '4' },
-        { value: '6', label: '6' },
-        { value: '8', label: '8' },
-        { value: '10', label: '10' }
-      ]
-    },
-    {
       key: 'preferCachedFirst',
       label: 'Prefer cached torrents when unlocking',
       type: 'bool',
@@ -128,6 +120,11 @@ function _cachedOnly() {
   return s.cachedOnly !== false && s.cachedOnly !== 'false' && s.cachedOnly !== 0;
 }
 
+function _useWebStreaming() {
+  var s = _settings();
+  return s.webStreaming === true || s.webStreaming === 'true' || s.webStreaming === 1;
+}
+
 function _torrentioBase() {
   var b = _trim(_settings().torrentioBase || '') || _TORRENTIO;
   while (b.length && b.charAt(b.length - 1) === '/') b = b.slice(0, -1);
@@ -148,12 +145,6 @@ function _torrentioLimitPerQuality() {
 function _maxCandidates() {
   var n = parseInt(_settings().maxCandidates, 10);
   if (isNaN(n) || n === 0) return 999;
-  return n;
-}
-
-function _maxPlayableSources() {
-  var n = parseInt(_settings().maxPlayableSources, 10);
-  if (isNaN(n) || n < 1) return 6;
   return n;
 }
 
@@ -289,7 +280,7 @@ function _parseEpFromName(name) {
     || s.match(/Season\s*(\d{1,2})\s*(?:Episode|Ep\.?)\s*(\d{1,3})/i);
   if (m) return { s: parseInt(m[1], 10), e: parseInt(m[2], 10), multi: false };
   if (/[Ss]\d{1,2}\s*[Ee]\d{1,3}\s*[-~]\s*[Ee]?\d{1,3}/.test(s)
-      || /\bE\d{1,3}\s*[-~]\s*E?\d{1,3}\b/i.test(s)) {
+    || /\bE\d{1,3}\s*[-~]\s*E?\d{1,3}\b/i.test(s)) {
     return { s: 0, e: 0, multi: true };
   }
   // Absolute episode: "Episode 200", " - 200 - ", " (005)."
@@ -603,7 +594,7 @@ function _torrentioStreams(imdb, isMovie, season, episode) {
       browser: !!useBrowser
     }).then(function (r) {
       var j = null;
-      try { j = JSON.parse(r.body || 'null'); } catch (e) {}
+      try { j = JSON.parse(r.body || 'null'); } catch (e) { }
       var list = (j && j.streams) || [];
       return Array.isArray(list) ? list : [];
     }).catch(function () { return []; });
@@ -663,9 +654,9 @@ function _detectAudioKind(blob) {
   if (/\bdual[\s._-]*audio\b|\bdualaudio\b/.test(s)) return 'dub';
   if (/\b(?:eng(?:lish)?[\s._-]*)?dub(?:bed)?\b/.test(s) && !/\bdubtitle/.test(s)) return 'dub';
   if (/\b(?:multi[\s._-]*audio|multiaudio)\b/.test(s)
-      && /\b(?:eng(?:lish)?|en)\b/.test(s)) return 'dub';
+    && /\b(?:eng(?:lish)?|en)\b/.test(s)) return 'dub';
   if (/\b(?:soft[\s._-]*)?subs?\b|\bhardsub|\bmulti[\s._-]*subs?\b/.test(s)
-      && !/\bdub(?:bed)?\b|\bdual[\s._-]*audio\b/.test(s)) return 'sub';
+    && !/\bdub(?:bed)?\b|\bdual[\s._-]*audio\b/.test(s)) return 'sub';
   // Japanese-only / unmarked anime rips — treat as sub, not dub.
   if (/\b(?:jpn?|japanese|raw)\b/.test(s) && !/\b(?:eng(?:lish)?|dual|dub)\b/.test(s)) {
     return 'sub';
@@ -790,6 +781,36 @@ function _requestDl(key, torrentId, fileId) {
   });
 }
 
+// TorBox transcoded HLS (Stremio-style). Needs web streaming on the account;
+// PLAN_RESTRICTED_FEATURE → caller falls back to requestdl.
+function _webStreamUrl(key, torrentId, fileId) {
+  var cq = 'id=' + encodeURIComponent(String(torrentId))
+    + '&file_id=' + encodeURIComponent(String(fileId))
+    + '&type=torrent';
+  return _tbGet('/stream/createstream?' + cq, key).then(function (j) {
+    if (!j || j.success === false) return null;
+    var data = j.data;
+    var presigned = (data && (data.presigned_token || data.presignedToken)) || null;
+    if (!presigned) return null;
+    var dq = 'presigned_token=' + encodeURIComponent(String(presigned))
+      + '&token=' + encodeURIComponent(key);
+    return _tbGet('/stream/getstreamdata?' + dq, key).then(function (j2) {
+      if (!j2 || j2.success === false) return null;
+      var hls = j2.data && j2.data.hls_url;
+      return (typeof hls === 'string' && /^https?:\/\//i.test(hls)) ? hls : null;
+    });
+  }).catch(function () { return null; });
+}
+
+function _playbackUrl(key, torrentId, fileId, streamOnly) {
+  if (!_useWebStreaming()) return _requestDl(key, torrentId, fileId);
+  return _webStreamUrl(key, torrentId, fileId).then(function (hls) {
+    if (hls) return hls;
+    if (streamOnly) return null;
+    return _requestDl(key, torrentId, fileId);
+  });
+}
+
 function _sourceFrom(url, cand, file, cached) {
   if (!url) return null;
   var q = cand.quality || _quality(cand.filename) || _quality(file && file.name) || 'auto';
@@ -798,6 +819,7 @@ function _sourceFrom(url, cand, file, cached) {
   var label = (q !== 'auto' ? q + ' · ' : '') + display;
   if (size) label += ' · ' + size;
   if (cached) label = '⚡ ' + label;
+  if (/\.m3u8(\?|$)/i.test(url) && !/\bHLS\b/i.test(label)) label += ' · HLS';
   var kind = cand.audioKind || 'raw';
   if (kind === 'dub' && !/\bdub\b|\bdual/i.test(label)) label += ' · Dub';
   return {
@@ -817,7 +839,7 @@ function _cacheHasPlayableFile(cacheInfo, season, episode, isMovie, preferredNam
 
 // Fast path: checkcached file list + createtorrent → requestdl.
 // Avoids full /mylist (multi‑MB) which was causing 8s playback timeouts.
-function _resolveOne(key, cand, cacheInfo, season, episode, isMovie, cachedOnly, absEp) {
+function _resolveOne(key, cand, cacheInfo, season, episode, isMovie, cachedOnly, absEp, streamOnly) {
   var cacheFiles = (cacheInfo && cacheInfo.files) || [];
   var picked = _pickFile(cacheFiles, season, episode, isMovie, cand.filename, absEp);
 
@@ -825,7 +847,7 @@ function _resolveOne(key, cand, cacheInfo, season, episode, isMovie, cachedOnly,
     if (torrentId == null) return Promise.resolve(null);
     var file = _pickFile(files || cacheFiles, season, episode, isMovie, cand.filename, absEp) || picked;
     if (!file || file.id == null) return Promise.resolve(null);
-    return _requestDl(key, torrentId, file.id).then(function (url) {
+    return _playbackUrl(key, torrentId, file.id, !!streamOnly).then(function (url) {
       return _sourceFrom(url, cand, file, cached);
     });
   }
@@ -893,7 +915,10 @@ function getVideoSources(episodeUrl, fast) {
   var episode = isMovie ? 0 : (p.episode || 0);
   var absEp = isMovie ? null : (p.abs || null);
   var cachedOnly = _cachedOnly();
-  var maxOut = _maxPlayableSources();
+  var webHls = _useWebStreaming();
+  var maxOut = 6;
+  // HLS path: createstream + getstreamdata per unlock — stay inside ~8s playback budget.
+  if (playbackFast && webHls) maxOut = 1;
 
   return _ensureImdb(p.kind, p.tmdbId, p.imdb).then(function (imdb) {
     if (!imdb) return [];
@@ -904,7 +929,7 @@ function getVideoSources(episodeUrl, fast) {
       // Playback has an ~8s app budget unless TorBox is pinned; huge checkcached
       // payloads for every candidate were eating most of it.
       var hashCap = playbackFast
-        ? Math.min(cands.length, maxOut + 3)
+        ? (webHls ? Math.min(cands.length, 2) : Math.min(cands.length, maxOut + 3))
         : cands.length;
       var hashes = cands.slice(0, hashCap).map(function (c) { return c.hash; });
       return _checkCachedFiles(key, hashes).then(function (cacheMap) {
@@ -935,12 +960,22 @@ function getVideoSources(episodeUrl, fast) {
 
         var toResolve = filtered.slice(0, maxOut);
 
+        if (playbackFast && webHls) {
+          // One candidate, HLS only (no requestdl fallback) — parallel unlock blew the budget.
+          var c0 = toResolve[0];
+          if (!c0) return [];
+          c0.cached = !!cacheMap[c0.hash];
+          return _resolveOne(
+            key, c0, cacheMap[c0.hash], season, episode, isMovie, cachedOnly, absEp, true
+          ).then(function (src) { return src ? [src] : []; });
+        }
+
         if (playbackFast) {
           // Unlock mirrors in parallel so playback fits the per-source time budget.
           return Promise.all(toResolve.map(function (c) {
             c.cached = !!cacheMap[c.hash];
             return _resolveOne(
-              key, c, cacheMap[c.hash], season, episode, isMovie, cachedOnly, absEp
+              key, c, cacheMap[c.hash], season, episode, isMovie, cachedOnly, absEp, false
             );
           })).then(function (results) {
             var out = [];
@@ -956,7 +991,7 @@ function getVideoSources(episodeUrl, fast) {
           if (i >= toResolve.length || out.length >= maxOut) return out;
           var c = toResolve[i];
           c.cached = !!cacheMap[c.hash];
-          return _resolveOne(key, c, cacheMap[c.hash], season, episode, isMovie, cachedOnly, absEp)
+          return _resolveOne(key, c, cacheMap[c.hash], season, episode, isMovie, cachedOnly, absEp, false)
             .then(function (src) {
               if (src) out.push(src);
               return next(i + 1);
