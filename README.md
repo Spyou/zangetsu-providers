@@ -31,6 +31,7 @@ One manifest = many sources. This default repo is added on first launch, so user
 | BollyFlix | Movie / Series | Bollywood and Hollywood, dual-audio releases. |
 | MoviesDrive | Movie / Series | Movies and series, WEB-DL releases. |
 | MultiMovies | Movie / Series | Streaming (HLS) for movies and series; series availability varies by title. |
+| TorBox | Movie / Series | Debrid via Torrentio discovery + TorBox API. Requires your TorBox API key. Optional: Torrentio sort/limit, max candidates, max playable streams, cached-only. |
 
 Availability depends on each site staying up; sources are updated as sites change.
 

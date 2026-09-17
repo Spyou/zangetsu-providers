@@ -5,7 +5,7 @@
     {
       "id": "anikoto",
       "name": "AniKoto",
-      "version": "1.0.7",
+      "version": "1.0.8",
       "type": "anime",
       "lang": "en",
       "file": "providers/anikoto.js",
@@ -72,6 +72,15 @@
       "type": "anime",
       "lang": "zh",
       "file": "providers/animecube.js",
+      "nsfw": false
+    },
+    {
+      "id": "torbox",
+      "name": "TorBox",
+      "version": "1.0.8",
+      "type": "movie",
+      "lang": "en",
+      "file": "providers/torbox.js",
       "nsfw": false
     }
   ]
