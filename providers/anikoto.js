@@ -37,7 +37,7 @@ var MAPPER = 'https://mapper.nekostream.site/api/mal/';
 
 function getInfo() {
   return { name: 'AniKoto', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.7' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.8' };
 }
 
 // MegaPlay/VidWish: getSourcesNew is the endpoint their player hits; both routes
@@ -481,22 +481,12 @@ function _extractPlayer(embed, cat) {
           }
           return o;
         };
-        if (!/\.m3u8(\?|$)/i.test(file)) return [mk(file, 'auto')];
-        return fetch(file, { headers: { 'User-Agent': UA, 'Referer': base + '/' } }).then(function (mr) {
-          var body = mr.body || '';
-          var dir = file.replace(/[^/]*(\?.*)?$/, '');
-          var vs = [], m2, re = /#EXT-X-STREAM-INF:[^\n]*?RESOLUTION=\d+x(\d+)[^\n]*\r?\n([^\r\n#]+)/gi;
-          while ((m2 = re.exec(body)) !== null) {
-            var h = parseInt(m2[1], 10);
-            var uri = String(m2[2]).replace(/^\s+|\s+$/g, '');
-            if (!uri) continue;
-            vs.push({ h: h, url: /^https?:/i.test(uri) ? uri : (dir + uri) });
-          }
-          vs.sort(function (a, b) { return b.h - a.h; });
-          var outv = [mk(file, 'auto')];
-          for (var k = 0; k < vs.length; k++) outv.push(mk(vs[k].url, vs[k].h + 'p'));
-          return outv;
-        }).catch(function () { return [mk(file, 'auto')]; });
+        // Hand back the master only. Probing master.m3u8 here (to expand
+        // 1080p/720p rows) hits Cloudflare on fetch.nexabloom.top and the
+        // native CfSolver routinely blows the app's 8s per-source budget —
+        // resolve then reports "episode not available" even though we already
+        // had a playable URL. Exo/the player pick HLS renditions themselves.
+        return [mk(file, 'auto')];
       }
 
       if (!needSibling) return finish(null);
