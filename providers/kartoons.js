@@ -12,7 +12,7 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'Kartoons', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.1' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.2' };
 }
 
 function getSettings() {
@@ -146,13 +146,14 @@ function _ep(showId, seasonSlug, seasonNum, ep, n) {
 }
 
 function _baseDetail(url, data, episodes) {
+  var y = data.releaseYear || data.startYear || null;
   return {
     id: url, title: _trim(data.title) || 'Untitled',
     cover: data.image || data.coverImage || null, url: url,
     description: _trim(data.description), status: data.status || 'unknown',
     genres: (data.tags || []).slice(0, 8), studios: [], type: 'anime',
     sourceId: SOURCE_ID, episodes: episodes,
-    year: data.releaseYear || data.startYear || null, malId: null,
+    year: (y == null) ? null : String(y), malId: null,
     subCount: episodes.length, dubCount: 0
   };
 }

@@ -95,7 +95,7 @@
     {
       "id": "kartoons",
       "name": "Kartoons",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "type": "anime",
       "lang": "en",
       "file": "providers/kartoons.js",
