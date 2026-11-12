@@ -91,6 +91,16 @@
       "file": "providers/torbox.js",
       "logo": "icons/torbox.png",
       "nsfw": false
+    },
+    {
+      "id": "kartoons",
+      "name": "Kartoons",
+      "version": "1.0.0",
+      "type": "anime",
+      "lang": "en",
+      "file": "providers/kartoons.js",
+      "logo": "icons/kartoons.png",
+      "nsfw": false
     }
   ]
 }
