@@ -12,12 +12,12 @@ var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 function getInfo() {
   return { name: 'Kartoons', lang: 'en', baseUrl: SITE,
-    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.0' };
+    logo: SITE + '/favicon.ico', type: 'anime', version: '1.0.1' };
 }
 
 function getSettings() {
   return [
-    { key: 'token', label: 'API token (needed for playback)', type: 'text', default: '' },
+    { key: 'token', label: 'API token (site Profile → Stremio tab → copy token)', type: 'text', default: '' },
     { key: 'audioLang', label: 'Preferred audio', type: 'enum', default: 'hin',
       options: [
         { value: 'hin', label: 'Hindi' },
@@ -158,6 +158,23 @@ function _baseDetail(url, data, episodes) {
 }
 
 function getDetail(url, opts) {
+  var key = String(url);
+  var hit = _detailCache[key];
+  var now = Date.now();
+  if (hit && (now - hit.at) < _DETAIL_TTL) return Promise.resolve(hit.value);
+  return _fetchDetail(url, opts).then(function (d) {
+    if (d && d.episodes && d.episodes.length) {
+      _detailCache[key] = { at: Date.now(), value: d };
+    }
+    return d;
+  });
+}
+
+// Detail screen hits this a lot — cache 5 min.
+var _detailCache = {};
+var _DETAIL_TTL = 300000;
+
+function _fetchDetail(url, opts) {
   var p = _parseUrl(url);
   if (!p) return Promise.resolve(null);
   if (p.kind === 'movie') return _movieDetail('/movie/' + p.id, p.id);
